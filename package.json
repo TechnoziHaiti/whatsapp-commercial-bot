@@ -1,0 +1,20 @@
+{
+  "name": "whatsapp-commercial-bot",
+  "version": "1.0.0",
+  "description": "Chatbot commercial WhatsApp Cloud API avec automatisation par e-mail via n8n",
+  "scripts": {
+    "n8n": "n8n",
+    "dev": "node ./scripts/start-all.js",
+    "start": "powershell -ExecutionPolicy Bypass -File ./scripts/start-n8n.ps1",
+    "tunnel": "powershell -ExecutionPolicy Bypass -File ./scripts/start-tunnel.ps1"
+  },
+  "keywords": [
+    "whatsapp",
+    "cloud-api",
+    "n8n",
+    "chatbot",
+    "technozi"
+  ],
+  "author": "Technozi",
+  "license": "ISC"
+}

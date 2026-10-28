@@ -1,0 +1,23 @@
+# Dépendances Node.js
+node_modules/
+package-lock.json
+
+# Fichiers d'environnement et secrets
+.env
+*.local
+
+# Données n8n et persistance locale
+.n8n/
+.n8n_data/
+*.sqlite
+
+# Outils locaux
+tools/
+*.exe
+
+# Logs et temporaires
+logs/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
