@@ -139,24 +139,28 @@ const userLower = userText.toLowerCase();
 const staticData = $getWorkflowStaticData('global');
 staticData.sessions = staticData.sessions || {};
 
-let session = staticData.sessions[senderPhone] || {
-  step: 'AWAIT_LANGUAGE',
-  lang: '',
-  data: {
-    typeDemande: 'materiel',
-    clientName: senderName,
-    clientEmail: '',
-    phone: senderPhone,
-    produit: '',
-    reference: '',
-    quantite: '',
-    projet: '',
-    batiment: '',
-    zone: '',
-    remarques: ''
-  },
-  lastActive: Date.now()
-};
+if (!staticData.sessions[senderPhone]) {
+  staticData.sessions[senderPhone] = {
+    step: 'AWAIT_LANGUAGE',
+    lang: '',
+    data: {
+      typeDemande: 'materiel',
+      clientName: senderName,
+      clientEmail: '',
+      phone: senderPhone,
+      produit: '',
+      reference: '',
+      quantite: '',
+      projet: '',
+      batiment: '',
+      zone: '',
+      remarques: ''
+    },
+    lastActive: Date.now()
+  };
+}
+
+let session = staticData.sessions[senderPhone];
 
 // Expiration de session après 30 minutes d'inactivité
 if (Date.now() - session.lastActive > 30 * 60 * 1000) {
@@ -1709,6 +1713,9 @@ Remarques    : \${emailData.remarques}
 Transmis automatiquement par Pitonbot (Technozi WhatsApp Bot)\`;
   }
 }
+
+// Persister la session du client dans la mémoire n8n
+staticData.sessions[senderPhone] = session;
 
 return [{
   json: {
