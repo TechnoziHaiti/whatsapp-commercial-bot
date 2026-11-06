@@ -1,3 +1,11 @@
 bot.technozi-ht.com {
-    reverse_proxy n8n:5678
+    # Routage de la passerelle WhatsApp Evolution API
+    handle_path /evolution* {
+        reverse_proxy evolution-api:8080
+    }
+
+    # Routage principal vers n8n
+    handle {
+        reverse_proxy n8n:5678
+    }
 }
