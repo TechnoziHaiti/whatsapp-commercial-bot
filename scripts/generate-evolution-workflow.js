@@ -1,13 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 
-require('dotenv').config();
-
-// Identifiants & Configuration
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'CLE_GEMINI_PLACEHOLDER';
+// Pour dépôt public : placeholder sécurisé (la vraie clé reste dans le .env secret et n8n)
+const GEMINI_API_KEY = 'VOTRE_CLE_GEMINI_ICI';
 const EVOLUTION_API_KEY = 'technozi_evolution_key_2026';
 const DEVELOPER_EMAIL = 'pitonrodjy@gmail.com';
-const SALES_EMAIL = 'sales@technozi-ht.com';
 
 const workflow = {
   name: "Technozi AI Co-Pilot v2 (Gemini + Evolution)",
@@ -227,10 +224,10 @@ staticData.conversations = staticData.conversations || {};
 
 // =========================================================================
 // RÈGLE D'OR : SI LE MESSAGE VIENT DE MOI (HUMAIN SUR LE SMARTPHONE)
-// ON MET L'IA EN PAUSE PENDANT 30 MINUTES POUR LAISSER L'HUMAIN DISCUTER !
+// ON MET L'IA EN PAUSE PENDANT 15 MINUTES POUR LAISSER L'HUMAIN DISCUTER !
 // =========================================================================
 if (fromMe) {
-  staticData.pausedUntil[remoteJid] = Date.now() + (30 * 60 * 1000); // 30 min de silence
+  staticData.pausedUntil[remoteJid] = Date.now() + (15 * 60 * 1000); // 15 min de silence
   return [];
 }
 
@@ -338,12 +335,12 @@ return [{
     },
 
     // -------------------------------------------------------------------------
-    // 5. APPEL IA GOOGLE GEMINI 1.5 FLASH (GRATUIT)
+    // 5. APPEL IA GOOGLE GEMINI 3.5 FLASH (GRATUIT, TRILINGUE, PRO & SANS PRIX)
     // -------------------------------------------------------------------------
     {
       parameters: {
         method: "POST",
-        url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+        url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`,
         sendHeaders: true,
         headerParameters: {
           parameters: [
@@ -359,44 +356,73 @@ return [{
             const phone = $json.senderPhone;
             const history = $json.history || [];
 
-            const systemPrompt = \`Ou se Pitonbot, asistan komèsyal entèlijan ofisyèl Technozi Haïti (Faster & Easier).
-Misyon w se ede kliyan yo avèk jantiyès, pwofesyonalis ak efikasite nan lang yo prefere (Kreyòl Ayisyen oswa Français).
+            const systemPrompt = \`Vous êtes l'assistant d'accueil et de qualification officiel de Technozi Haïti (Faster & Easier).
+Votre rôle est d'accueillir chaque client avec une extrême gentillesse, un profond respect et un grand professionnalisme, d'écouter attentivement sa demande, et de noter proprement ses doléances pour l'équipe Technozi.
 
-ENFÒMASYON SOU TECHNOZI :
-• Slogan : Faster & Easier
-• Sit Wèb : https://technozi-ht.com
-• Telefòn komèsyal : +509 37 03 0009
-• E-mail : sales@technozi-ht.com
-• Orè : Lendi-Vandredi 8h-17h, Samdi 8h-15h
-• 6 Gwo Sèvis Nou yo :
-  1. Enèji Solè Ibrid (Ondilè, batri lityòm, panno)
-  2. Entènèt Satelit Starlink (Vant kit estanda & enstalasyon pro)
-  3. Kamera Siveyans CCTV (HD, vizyon nwit, aksè telefòn 24/7)
-  4. Rezo Enfòmatik & Wi-Fi (Filaj sètifye, switch)
-  5. Vant Materyèl Enfòmatik (Laptops pro, PC biwo, pyès)
-  6. Sipò & Mentnans IT (Kontra mentnans, reparasyon)
-• Aplikasyon mobil : Disponib sou Play Store ak App Store.
+RÈGLE D'OR N°1 : TRILINGUE NATUREL (Français, Kreyòl Ayisyen, English)
+Détectez automatiquement la langue du client et répondez toujours dans sa langue :
+• S'il parle Kreyòl : répondez en Kreyòl Ayisyen fluide, très poli et professionnel.
+• S'il parle Français : répondez en Français soigné, chaleureux et irréprochable.
+• S'il parle Anglais : répondez en English professionnel, courtois et impeccable.
 
-RÈG POU REPONS OU :
-1. PALE NATIRÈLMAN : Reponn kliyan an nan lang li pale a (si l pale Kreyòl, reponn an Kreyòl dous ak pwofesyonèl; si l pale Français, reponn an Français).
-2. DEMANN STARLINK : Si kliyan an di li bezwen yon Starlink, eksplike li ke nou vann kit la epi nou ka fè enstalasyon an tou si li vle. Mande l kisa li prefere.
-3. DEMANN PROFORMA OUBYEN DEVIS : Si kliyan an mande yon proforma oswa yon devis, mande l jantiyeman non konplè oswa non antrepriz la, yon adrès imèl, ak vil/zòn kote l ye a pou ekip komèsyal la ka voye proforma ofisyèl la ba li.
-4. PA FÈ ENTEWOGATWA : Pa di "Kesyon 1/7" oswa "2/5". Poze kesyon yo tankou yon moun k ap pale nan telefòn.
-5. DEKLANCHE EMAIL : Lè ou fin gen tout enfòmasyon yo pou yon kòmand oswa yon proforma (Non, Ekipman/Sèvis, Zòn, Imèl si posib), mete nan tout fen repons ou an baliz sa a egzakteman :
-[ENVOYER_EMAIL: {"client":"Non","produit":"Pwodwi","zone":"Zòn","email":"Imèl","type":"devis"}]
-(Baliz sa a ap sèvi pou voye fich la bay ekip komèsyal la, kliyan an pap wè l).
+RÈGLE D'OR N°2 : AUCUN PRIX NI TARIF FIXE
+NE DONNEZ JAMAIS DE PRIX ou d'estimation financière.
+Si le client demande un prix, expliquez-lui avec beaucoup de courtoisie que Technozi établit des devis sur-mesure selon la nature exacte de chaque projet et sa zone géographique en Haïti. Proposez-lui de recueillir ses détails pour que l'équipe Technozi prépare sa proposition exacte.
 
-Non kliyan an nan WhatsApp : \${clientName}
-Nimewo telefòn : +\${phone}\`;
+RÈGLE D'OR N°3 : TOUS LES SERVICES DE TECHNOZI SONT ÉGAUX
+Technozi est une entreprise technologique multi-services. Starlink n'est pas le seul produit. Le client est libre de demander ce qu'il souhaite :
+• Énergie Solaire & Systèmes de Secours (Onduleurs hybrides, batteries lithium, panneaux solaires)
+• Internet Satellitaire & Starlink (Kits officiels et installations soignées sur mât/toiture)
+• Caméras de Sécurité & Surveillance (Systèmes CCTV HD, vision nocturne, accès distant)
+• Réseaux Informatiques & Wi-Fi (Câblage structuré certifié, Wi-Fi professionnel)
+• Matériel & Équipements Informatiques (Laptops professionnels, ordinateurs de bureau, accessoires)
+• Support & Maintenance Informatique (Assistance technique, diagnostics, réparations)
+• Toute autre doléance ou demande technologique.
+
+RÈGLE D'OR N°4 : STYLE & SOBRIÉTÉ (Pas d'avalanche d'émojis ni de monotonie)
+• Soyez chaleureux et très poli, sans réponses robotiques copier-coller.
+• Évitez l'accumulation d'icônes : au maximum 1 ou 2 émojis discrets par message.
+• Privilégiez des phrases claires et bien aérées avec des puces (•).
+
+RÈGLE D'OR N°5 : RECUEIL DES COORDONNÉES
+Recueillez poliment auprès du client au fil de la discussion :
+1. Son Nom complet (ou Nom de son entreprise/organisation).
+2. Sa Ville / Zone géographique en Haïti (ex: Pétion-Ville, Delmas, Cap-Haïtien, etc.).
+3. Sa demande / doléance précise.
+
+RÈGLE D'OR N°6 : VÉRIFICATION DE FIN & FICHE RÉCAPITULATIVE
+1. Une fois que vous avez répondu à ses questions et noté son besoin :
+Demandez-lui gentiment s'il a terminé ou s'il souhaite ajouter d'autres précisions :
+• FR : "Avez-vous d'autres précisions ou questions à ajouter, ou avons-nous fait le tour de votre demande ?"
+• KR : "Èske w gen yon lòt presizyon oswa kesyon ou ta renmen ajoute, oswa èske nou kouvri tout sa w te bezwen ?"
+• EN : "Do you have any other details or questions to add, or have we covered everything you need?"
+
+2. Dès que le client confirme qu'il a terminé ("C'est bon", "Non c'est tout", "M fini", "That's all", "Oui j'ai terminé", etc.) :
+Affichez immédiatement la FICHE RÉCAPITULATIVE structurée suivante :
+
+📋 Récapitulatif de votre demande :
+• Client : [Nom ou Entreprise]
+• Téléphone : +\${phone}
+• Ville / Zone : [Localisation indiquée]
+• Service / Demande : [Doléance précise exprimée par le client]
+• Précisions : [Détails ou contraintes particulières, ou "Aucune"]
+
+Merci beaucoup ! Vos informations sont bien enregistrées. Notre équipe Technozi révise votre dossier pour vous recontacter très rapidement.
+
+(Adaptez le texte du récapitulatif en Créole ou en Anglais si la conversation est en Créole ou en Anglais).
+
+Coordonnées du client :
+Nom WhatsApp : \${clientName}
+Numéro : +\${phone}\`;
 
             // Construire les messages de contenu
             const contents = [
               { role: "user", parts: [{ text: systemPrompt }] },
-              { role: "model", parts: [{ text: "Konprann 100%! Mwen pare pou m sèvi kliyan Technozi yo avèk entèlijans ak rapidite." }] }
+              { role: "model", parts: [{ text: "Bien reçu et parfaitement compris. Je suis prêt à accueillir et qualifier chaque client de Technozi avec excellence, sobriété, et sans jamais donner de prix." }] }
             ];
 
-            // Ajouter l'historique récent (4 derniers échanges)
-            for (const h of history.slice(-4)) {
+            // Ajouter l'historique récent (6 derniers échanges)
+            for (const h of history.slice(-6)) {
               contents.push({ role: h.role, parts: [{ text: h.text }] });
             }
 
@@ -406,7 +432,7 @@ Nimewo telefòn : +\${phone}\`;
             return {
               contents: contents,
               generationConfig: {
-                temperature: 0.4,
+                temperature: 0.35,
                 maxOutputTokens: 800
               }
             };
@@ -424,33 +450,19 @@ Nimewo telefòn : +\${phone}\`;
     },
 
     // -------------------------------------------------------------------------
-    // 6. EXTRAIRE LA RÉPONSE ET FORMATER L'ENVOI WHATSAPP
+    // 6. EXTRAIRE LA RÉPONSE DE L'IA
     // -------------------------------------------------------------------------
     {
       parameters: {
         jsCode: `// Parser la réponse de Gemini
 const geminiRes = $input.item.json;
 const candidate = geminiRes.candidates?.[0];
-let aiText = candidate?.content?.parts?.[0]?.text || "Mèsi pou mesaj ou a. Ekip Technozi a resevwa l epi n ap reponn ou touswit !";
+let aiText = candidate?.content?.parts?.[0]?.text || "Merci pour votre message. L'équipe Technozi a bien reçu votre demande et vous répondra très rapidement.";
 
 const prevData = $('1. Filtre & Détecteur Humain').item.json;
 const remoteJid = prevData.remoteJid;
 const senderPhone = prevData.senderPhone;
 const userText = prevData.userText;
-
-// Vérifier si un devis/proforma complet doit être envoyé par email
-let shouldSendEmail = false;
-let emailPayload = null;
-
-const emailMatch = aiText.match(/\\[ENVOYER_EMAIL:\\s*(\\{.*?\\})\\]/s);
-if (emailMatch) {
-  try {
-    emailPayload = JSON.parse(emailMatch[1]);
-    shouldSendEmail = true;
-  } catch (e) {}
-  // Nettoyer la balise pour ne pas l'afficher au client WhatsApp
-  aiText = aiText.replace(/\\[ENVOYER_EMAIL:.*?\\]/s, "").trim();
-}
 
 // Mettre à jour l'historique de conversation
 const staticData = $getWorkflowStaticData('global');
@@ -460,18 +472,16 @@ staticData.conversations[remoteJid] = staticData.conversations[remoteJid] || [];
 staticData.conversations[remoteJid].push({ role: "user", text: userText });
 staticData.conversations[remoteJid].push({ role: "model", text: aiText });
 
-// Garder maximum les 10 derniers échanges en mémoire
-if (staticData.conversations[remoteJid].length > 10) {
-  staticData.conversations[remoteJid] = staticData.conversations[remoteJid].slice(-10);
+// Garder maximum les 12 derniers échanges en mémoire
+if (staticData.conversations[remoteJid].length > 12) {
+  staticData.conversations[remoteJid] = staticData.conversations[remoteJid].slice(-12);
 }
 
 return [{
   json: {
     remoteJid,
     senderPhone,
-    aiText,
-    shouldSendEmail,
-    emailPayload
+    aiText
   }
 }];`
       },
@@ -483,7 +493,7 @@ return [{
     },
 
     // -------------------------------------------------------------------------
-    // 7. ENVOYER LA RÉPONSE WHATSAPP VIA LA PASSERELLE EVOLUTION
+    // 7. ENVOYER LA RÉPONSE WHATSAPP (Via Evolution API avec Body Parameters)
     // -------------------------------------------------------------------------
     {
       parameters: {
@@ -498,10 +508,7 @@ return [{
         },
         sendBody: true,
         specifyBody: "json",
-        jsonBody: `={
-          "number": "{{ $json.remoteJid }}",
-          "text": "{{ $json.aiText }}"
-        }`,
+        jsonBody: "={{ JSON.stringify({ number: $json.remoteJid, text: $json.aiText }) }}",
         options: {
           timeout: 15000
         }
@@ -511,63 +518,6 @@ return [{
       type: "n8n-nodes-base.httpRequest",
       typeVersion: 4.2,
       position: [1400, 520]
-    },
-
-    // -------------------------------------------------------------------------
-    // 8. VÉRIFIER SI UN EMAIL COMMERCIAL DOIT ÊTRE ENVOYÉ
-    // -------------------------------------------------------------------------
-    {
-      parameters: {
-        conditions: {
-          boolean: [
-            {
-              value1: "={{ $('3. Parser Réponse IA').item.json.shouldSendEmail }}",
-              value2: true
-            }
-          ]
-        }
-      },
-      id: "if-send-commercial-email",
-      name: "Doit envoyer Email Commercial ?",
-      type: "n8n-nodes-base.if",
-      typeVersion: 1,
-      position: [1640, 520]
-    },
-
-    // -------------------------------------------------------------------------
-    // 9. EXPÉDIER L'EMAIL DE PROFORMA/COMMANDE À SALES@TECHNOZI-HT.COM
-    // -------------------------------------------------------------------------
-    {
-      parameters: {
-        fromEmail: "sales@technozi-ht.com",
-        toEmail: SALES_EMAIL,
-        subject: "={{ `[PROFORMA / COMMANDE TECHNOZI] - ` + ($('3. Parser Réponse IA').item.json.emailPayload?.client || 'Client') }}",
-        emailFormat: "html",
-        html: `={{
-          \`<h2>NOUVELLE DEMANDE COMMERCIALE (IA TECHNOZI)</h2>
-          <hr>
-          <p><b>Client :</b> \${$('3. Parser Réponse IA').item.json.emailPayload?.client || 'Non renseigné'}</p>
-          <p><b>Téléphone :</b> +\${$('3. Parser Réponse IA').item.json.senderPhone}</p>
-          <p><b>E-mail :</b> \${$('3. Parser Réponse IA').item.json.emailPayload?.email || 'Non renseigné'}</p>
-          <p><b>Produit / Service :</b> \${$('3. Parser Réponse IA').item.json.emailPayload?.produit || 'Non renseigné'}</p>
-          <p><b>Zone / Ville :</b> \${$('3. Parser Réponse IA').item.json.emailPayload?.zone || 'Non renseigné'}</p>
-          <hr>
-          <p><b>Action immédiate :</b></p>
-          <p><a href="https://wa.me/\${$('3. Parser Réponse IA').item.json.senderPhone}" style="background:#00a884;color:white;padding:10px 18px;text-decoration:none;border-radius:8px;display:inline-block;">Répondre directement sur WhatsApp</a></p>\`
-        }}`,
-        options: {}
-      },
-      credentials: {
-        smtp: {
-          id: "kJkckSErhAAeGSci",
-          name: "SMTP account"
-        }
-      },
-      id: "send-sales-email",
-      name: "5. Expédier Email Commercial",
-      type: "n8n-nodes-base.emailSend",
-      typeVersion: 2.1,
-      position: [1880, 500]
     }
   ],
   connections: {
@@ -594,12 +544,6 @@ return [{
     },
     "3. Parser Réponse IA": {
       main: [[{ node: "4. Envoyer Réponse WhatsApp", type: "main", index: 0 }]]
-    },
-    "4. Envoyer Réponse WhatsApp": {
-      main: [[{ node: "Doit envoyer Email Commercial ?", type: "main", index: 0 }]]
-    },
-    "Doit envoyer Email Commercial ?": {
-      main: [[{ node: "5. Expédier Email Commercial", type: "main", index: 0 }]]
     }
   },
   settings: {
