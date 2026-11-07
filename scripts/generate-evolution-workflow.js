@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-// Pour dépôt public : placeholder sécurisé (la vraie clé reste dans le .env secret et n8n)
+// Identifiants & Configuration
 const GEMINI_API_KEY = 'VOTRE_CLE_GEMINI_ICI';
 const EVOLUTION_API_KEY = 'technozi_evolution_key_2026';
 const DEVELOPER_EMAIL = 'pitonrodjy@gmail.com';
@@ -221,6 +221,7 @@ const fromMe = key.fromMe === true;
 const staticData = $getWorkflowStaticData('global');
 staticData.pausedUntil = staticData.pausedUntil || {};
 staticData.conversations = staticData.conversations || {};
+staticData.userLanguage = staticData.userLanguage || {};
 
 // =========================================================================
 // RÈGLE D'OR : SI LE MESSAGE VIENT DE MOI (HUMAIN SUR LE SMARTPHONE)
@@ -262,6 +263,45 @@ if (msgId) {
   if (staticData.processedIds.length > 500) staticData.processedIds.shift();
 }
 
+// =========================================================================
+// GESTION DU CHOIX DE LA LANGUE DE SERVICE
+// =========================================================================
+// 1. Vérifier si le message est une sélection directe ou un clic de langue
+const rawSelectedRow = msg.listResponseMessage?.singleSelectReply?.selectedRowId || "";
+let selectedLang = null;
+
+if (rawSelectedRow === "lang_kreyol" || userText.toLowerCase().match(/^(krey[oò]l|kreyol ayisyen|pale krey[oò]l|an krey[oò]l|en cr[eé]ole|in creole)$/i)) {
+  selectedLang = "kreyol";
+} else if (rawSelectedRow === "lang_francais" || userText.toLowerCase().match(/^(fran[cç]ais|en fran[cç]ais|pale franse|parler fran[cç]ais|in french)$/i)) {
+  selectedLang = "francais";
+} else if (rawSelectedRow === "lang_english" || userText.toLowerCase().match(/^(english|anglais|in english|pale angle|speak english|en anglais)$/i)) {
+  selectedLang = "english";
+}
+
+if (selectedLang) {
+  staticData.userLanguage[remoteJid] = selectedLang;
+}
+
+// 2. Si le client demande explicitement à réafficher le menu de langue
+const wantsMenu = userText.toLowerCase().match(/^(lang|langue|language|changer de langue|changer langue|chanje lang|change language|menu langue|menu lang)$/i);
+if (wantsMenu) {
+  delete staticData.userLanguage[remoteJid];
+}
+
+const currentLang = staticData.userLanguage[remoteJid];
+const needsLanguageMenu = !currentLang;
+
+// Si le client vient de choisir sa langue, on oriente le message pour un accueil parfait
+if (selectedLang) {
+  if (selectedLang === "kreyol") {
+    userText = "Mwen chwazi Kreyòl Ayisyen. Byenvini m ak kè kontan epi mande m kisa m bezwen.";
+  } else if (selectedLang === "francais") {
+    userText = "J'ai choisi le Français. Souhaitez-moi la bienvenue chaleureusement et demandez-moi quel est mon besoin.";
+  } else if (selectedLang === "english") {
+    userText = "I have selected English. Please welcome me warmly and ask how you can assist me.";
+  }
+}
+
 // Historique de discussion pour Gemini
 staticData.conversations[remoteJid] = staticData.conversations[remoteJid] || [];
 const history = staticData.conversations[remoteJid];
@@ -273,6 +313,8 @@ return [{
     pushName,
     userText,
     history,
+    currentLang: staticData.userLanguage[remoteJid] || "francais",
+    needsLanguageMenu,
     isSystemAlert: false
   }
 }];`
@@ -285,7 +327,7 @@ return [{
     },
 
     // -------------------------------------------------------------------------
-    // 3. AIGUILLAGE : ALERTE DÉCONNEXION OU CERVEAU IA
+    // 3. AIGUILLAGE : ALERTE TECHNIQUE
     // -------------------------------------------------------------------------
     {
       parameters: {
@@ -331,11 +373,119 @@ return [{
       name: "Alerte Développeur (Email)",
       type: "n8n-nodes-base.emailSend",
       typeVersion: 2.1,
-      position: [920, 260]
+      position: [920, 240]
     },
 
     // -------------------------------------------------------------------------
-    // 5. APPEL IA GOOGLE GEMINI 3.5 FLASH (GRATUIT, TRILINGUE, PRO & SANS PRIX)
+    // 5. AIGUILLAGE : BESOIN DU MENU LANGUE ?
+    // -------------------------------------------------------------------------
+    {
+      parameters: {
+        conditions: {
+          boolean: [
+            {
+              value1: "={{ $json.needsLanguageMenu }}",
+              value2: true
+            }
+          ]
+        }
+      },
+      id: "check-needs-language",
+      name: "Doit choisir la langue ?",
+      type: "n8n-nodes-base.if",
+      typeVersion: 1,
+      position: [920, 520]
+    },
+
+    // -------------------------------------------------------------------------
+    // 6. ENVOYER LE MENU DE CHOIX DE LANGUE (sendList WhatsApp)
+    // -------------------------------------------------------------------------
+    {
+      parameters: {
+        method: "POST",
+        url: "http://evolution-api:8080/message/sendList/technozi",
+        sendHeaders: true,
+        headerParameters: {
+          parameters: [
+            { name: "apikey", value: EVOLUTION_API_KEY },
+            { name: "Content-Type", value: "application/json" }
+          ]
+        },
+        sendBody: true,
+        specifyBody: "json",
+        jsonBody: `={{
+          JSON.stringify({
+            number: $json.remoteJid,
+            title: "Technozi Haïti (Faster & Easier)",
+            description: "Byenvini nan Technozi ! Tanpri chwazi lang sèvis ou pou n ka kòmanse.\\n\\nBienvenue chez Technozi ! Veuillez choisir votre langue de service pour commencer.\\n\\nWelcome to Technozi! Please select your service language to get started.",
+            buttonText: "🌐 Chwazi / Choisir / Select",
+            footerText: "Technozi - Faster & Easier",
+            sections: [
+              {
+                title: "Langues disponibles / Lang disponib",
+                rows: [
+                  {
+                    rowId: "lang_kreyol",
+                    title: "🇭🇹 Kreyòl Ayisyen",
+                    description: "Sèvis kliyan an Kreyòl"
+                  },
+                  {
+                    rowId: "lang_francais",
+                    title: "🇫🇷 Français",
+                    description: "Service client en Français"
+                  },
+                  {
+                    rowId: "lang_english",
+                    title: "🇺🇸 English",
+                    description: "Customer service in English"
+                  }
+                ]
+              }
+            ]
+          })
+        }}`,
+        options: {
+          timeout: 15000
+        }
+      },
+      id: "send-language-menu",
+      name: "Envoyer Menu Choix Langue",
+      type: "n8n-nodes-base.httpRequest",
+      typeVersion: 4.2,
+      position: [1200, 420]
+    },
+
+    // -------------------------------------------------------------------------
+    // 7. ENVOI DE L'INDICATEUR D'ÉCRITURE ("En train d'écrire...")
+    // -------------------------------------------------------------------------
+    {
+      parameters: {
+        method: "POST",
+        url: "http://evolution-api:8080/chat/sendPresence/technozi",
+        sendHeaders: true,
+        headerParameters: {
+          parameters: [
+            { name: "apikey", value: EVOLUTION_API_KEY },
+            { name: "Content-Type", value: "application/json" }
+          ]
+        },
+        sendBody: true,
+        specifyBody: "json",
+        jsonBody: "={{ JSON.stringify({ number: $json.remoteJid, presence: 'composing', delay: 3000 }) }}",
+        options: {
+          timeout: 5000
+        }
+      },
+      id: "send-presence-composing",
+      name: "Afficher 'En train d'écrire...'",
+      type: "n8n-nodes-base.httpRequest",
+      typeVersion: 4.2,
+      position: [1200, 620],
+      continueOnFail: true
+    },
+
+    // -------------------------------------------------------------------------
+    // 8. APPEL IA GOOGLE GEMINI 3.5 FLASH (GRATUIT, TRILINGUE, PRO & SANS PRIX)
     // -------------------------------------------------------------------------
     {
       parameters: {
@@ -355,15 +505,16 @@ return [{
             const clientName = $json.pushName || "Client";
             const phone = $json.senderPhone;
             const history = $json.history || [];
+            const userLang = $json.currentLang || "francais";
 
             const systemPrompt = \`Vous êtes l'assistant d'accueil et de qualification officiel de Technozi Haïti (Faster & Easier).
 Votre rôle est d'accueillir chaque client avec une extrême gentillesse, un profond respect et un grand professionnalisme, d'écouter attentivement sa demande, et de noter proprement ses doléances pour l'équipe Technozi.
 
-RÈGLE D'OR N°1 : TRILINGUE NATUREL (Français, Kreyòl Ayisyen, English)
-Détectez automatiquement la langue du client et répondez toujours dans sa langue :
-• S'il parle Kreyòl : répondez en Kreyòl Ayisyen fluide, très poli et professionnel.
-• S'il parle Français : répondez en Français soigné, chaleureux et irréprochable.
-• S'il parle Anglais : répondez en English professionnel, courtois et impeccable.
+RÈGLE D'OR N°1 : LANGUE SÉLECTIONNÉE PAR LE CLIENT (\${userLang.toUpperCase()})
+Le client a choisi la langue : \${userLang}.
+• Si \${userLang} === "kreyol" : Répondez TOUJOURS en Kreyòl Ayisyen fluide, très poli, chaleureux et professionnel.
+• Si \${userLang} === "francais" : Répondez TOUJOURS en Français soigné, chaleureux, élégant et irréprochable.
+• Si \${userLang} === "english" : Répondez TOUJOURS en English impeccable, courtois et professionnel.
 
 RÈGLE D'OR N°2 : AUCUN PRIX NI TARIF FIXE
 NE DONNEZ JAMAIS DE PRIX ou d'estimation financière.
@@ -373,9 +524,9 @@ RÈGLE D'OR N°3 : TOUS LES SERVICES DE TECHNOZI SONT ÉGAUX
 Technozi est une entreprise technologique multi-services. Starlink n'est pas le seul produit. Le client est libre de demander ce qu'il souhaite :
 • Énergie Solaire & Systèmes de Secours (Onduleurs hybrides, batteries lithium, panneaux solaires)
 • Internet Satellitaire & Starlink (Kits officiels et installations soignées sur mât/toiture)
-• Caméras de Sécurité & Surveillance (Systèmes CCTV HD, vision nocturne, accès distant)
-• Réseaux Informatiques & Wi-Fi (Câblage structuré certifié, Wi-Fi professionnel)
-• Matériel & Équipements Informatiques (Laptops professionnels, ordinateurs de bureau, accessoires)
+• Caméras de Sécurité & Surveillance (Systèmes CCTV HD, vision nocturne, accès distant 24/7)
+• Réseaux Informatiques & Wi-Fi (Câblage structuré certifié, Wi-Fi professionnel pour entreprises et résidences)
+• Matériel & Équipements Informatiques (Laptops professionnels HP/Dell, ordinateurs de bureau, accessoires)
 • Support & Maintenance Informatique (Assistance technique, diagnostics, réparations)
 • Toute autre doléance ou demande technologique.
 
@@ -409,7 +560,16 @@ Affichez immédiatement la FICHE RÉCAPITULATIVE structurée suivante :
 
 Merci beaucoup ! Vos informations sont bien enregistrées. Notre équipe Technozi révise votre dossier pour vous recontacter très rapidement.
 
-(Adaptez le texte du récapitulatif en Créole ou en Anglais si la conversation est en Créole ou en Anglais).
+(Adaptez le texte du récapitulatif dans la langue du client).
+
+RÈGLE D'OR N°7 : CONCISION ET PHRASES TOUJOURS COMPLÈTES
+• Vos réponses doivent être concises, élégantes et directes (maximum 2 à 3 paragraphes courts).
+• Vous devez TOUJOURS terminer complètement vos phrases, vos questions et vos listes. Ne coupez JAMAIS une phrase en plein milieu.
+
+RÈGLE D'OR N°8 : CHANGEMENT DE LANGUE NATUREL
+Si à n'importe quel moment, le client vous demande de changer de langue (ex: "Pouvez-vous me parler en créole ?", "Pale kreyòl pito", "Can we switch to English?", "M pa konprann, pale franse tanpri") :
+• Basculez IMMÉDIATEMENT et avec beaucoup de gentillesse dans la nouvelle langue demandée.
+• Confirmez poliment la prise en compte du changement et poursuivez l'assistance avec naturel dans cette nouvelle langue.
 
 Coordonnées du client :
 Nom WhatsApp : \${clientName}
@@ -418,7 +578,7 @@ Numéro : +\${phone}\`;
             // Construire les messages de contenu
             const contents = [
               { role: "user", parts: [{ text: systemPrompt }] },
-              { role: "model", parts: [{ text: "Bien reçu et parfaitement compris. Je suis prêt à accueillir et qualifier chaque client de Technozi avec excellence, sobriété, et sans jamais donner de prix." }] }
+              { role: "model", parts: [{ text: "Bien reçu et parfaitement compris. Je respecterai scrupuleusement la langue choisie par le client (" + userLang + "), sans jamais donner de prix et en terminant toujours mes phrases." }] }
             ];
 
             // Ajouter l'historique récent (6 derniers échanges)
@@ -433,7 +593,7 @@ Numéro : +\${phone}\`;
               contents: contents,
               generationConfig: {
                 temperature: 0.35,
-                maxOutputTokens: 800
+                maxOutputTokens: 2048
               }
             };
           })()
@@ -446,11 +606,11 @@ Numéro : +\${phone}\`;
       name: "2. Cerveau IA Gemini (Gratuit)",
       type: "n8n-nodes-base.httpRequest",
       typeVersion: 4.2,
-      position: [920, 520]
+      position: [1200, 780]
     },
 
     // -------------------------------------------------------------------------
-    // 6. EXTRAIRE LA RÉPONSE DE L'IA
+    // 9. EXTRAIRE LA RÉPONSE DE L'IA
     // -------------------------------------------------------------------------
     {
       parameters: {
@@ -489,11 +649,11 @@ return [{
       name: "3. Parser Réponse IA",
       type: "n8n-nodes-base.code",
       typeVersion: 2,
-      position: [1160, 520]
+      position: [1440, 780]
     },
 
     // -------------------------------------------------------------------------
-    // 7. ENVOYER LA RÉPONSE WHATSAPP (Via Evolution API avec Body Parameters)
+    // 10. ENVOYER LA RÉPONSE WHATSAPP (Via Evolution API avec Body Parameters)
     // -------------------------------------------------------------------------
     {
       parameters: {
@@ -517,7 +677,7 @@ return [{
       name: "4. Envoyer Réponse WhatsApp",
       type: "n8n-nodes-base.httpRequest",
       typeVersion: 4.2,
-      position: [1400, 520]
+      position: [1680, 780]
     }
   ],
   connections: {
@@ -536,7 +696,16 @@ return [{
     "Est-ce une alerte technique ?": {
       main: [
         [{ node: "Alerte Développeur (Email)", type: "main", index: 0 }],
-        [{ node: "2. Cerveau IA Gemini (Gratuit)", type: "main", index: 0 }]
+        [{ node: "Doit choisir la langue ?", type: "main", index: 0 }]
+      ]
+    },
+    "Doit choisir la langue ?": {
+      main: [
+        [{ node: "Envoyer Menu Choix Langue", type: "main", index: 0 }],
+        [
+          { node: "Afficher 'En train d'écrire...'", type: "main", index: 0 },
+          { node: "2. Cerveau IA Gemini (Gratuit)", type: "main", index: 0 }
+        ]
       ]
     },
     "2. Cerveau IA Gemini (Gratuit)": {
