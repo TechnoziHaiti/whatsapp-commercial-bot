@@ -42,10 +42,14 @@ services:
       - DATABASE_SAVE_DATA_CHATS=false
       - DELAY_IGNORE_SERVER=true
       - WEBHOOK_GLOBAL_ENABLED=false
+      - CACHE_REDIS_ENABLED=true
+      - CACHE_REDIS_URI=redis://redis:6379/0
+      - CACHE_REDIS_PREFIX_KEY=evolution:
     volumes:
       - evolution_instances:/evolution/instances
     depends_on:
       - postgres
+      - redis
 
   postgres:
     image: postgres:15-alpine
@@ -57,9 +61,16 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
 volumes:
   caddy_data:
   caddy_config:
   n8n_data:
   evolution_instances:
   postgres_data:
+  redis_data:
