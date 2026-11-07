@@ -43,8 +43,8 @@ services:
       - DELAY_IGNORE_SERVER=true
       - WEBHOOK_GLOBAL_ENABLED=false
       - CACHE_REDIS_ENABLED=true
-      - CACHE_REDIS_URI=redis://redis:6379/0
-      - CACHE_REDIS_PREFIX_KEY=evolution:
+      - CACHE_REDIS_URI="redis://redis:6379/0"
+      - CACHE_REDIS_PREFIX_KEY="evolution"
     volumes:
       - evolution_instances:/evolution/instances
     depends_on:
