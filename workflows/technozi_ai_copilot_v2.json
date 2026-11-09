@@ -40,7 +40,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        420,
+        440,
         160
       ],
       "continueOnFail": true
@@ -66,7 +66,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        640,
+        680,
         160
       ]
     },
@@ -83,13 +83,13 @@
       "typeVersion": 2,
       "position": [
         200,
-        420
+        440
       ],
       "webhookId": "evolution-whatsapp"
     },
     {
       "parameters": {
-        "jsCode": "// Filtrer et analyser le message entrant d'Evolution API\nconst body = $input.item.json.body || $input.item.json;\n\n// 1. Gestion des événements de déconnexion\nconst eventType = body.event;\nif (eventType === \"connection.update\") {\n  const state = body.data?.state || body.data?.status;\n  if (state === \"close\" || state === \"disconnected\") {\n    return [{\n      json: {\n        isSystemAlert: true,\n        alertType: \"DISCONNECTION\",\n        message: \"La session WhatsApp s'est déconnectée. Veuillez rescanner le QR code sur https://bot.technozi-ht.com/webhook/connect\"\n      }\n    }];\n  }\n  return [];\n}\n\n// 2. Traitement des messages\nif (eventType !== \"messages.upsert\") {\n  return [];\n}\n\nconst data = body.data;\nif (!data) return [];\n\nconst key = data.key;\nif (!key) return [];\n\nconst remoteJid = key.remoteJid || \"\";\n\n// Ignorer les messages de statut WhatsApp (stories) et les groupes\nif (remoteJid.includes(\"@broadcast\") || remoteJid.includes(\"@g.us\")) {\n  return [];\n}\n\nconst senderPhone = remoteJid.replace(\"@s.whatsapp.net\", \"\").replace(/[^0-9]/g, \"\");\nconst pushName = data.pushName || \"Client\";\nconst fromMe = key.fromMe === true;\n\n// Détection de la mémoire globale\nconst staticData = $getWorkflowStaticData('global');\nstaticData.pausedUntil = staticData.pausedUntil || {};\nstaticData.conversations = staticData.conversations || {};\nstaticData.userLanguage = staticData.userLanguage || {};\n\n// =========================================================================\n// RÈGLE D'OR : SI LE MESSAGE VIENT DE MOI (HUMAIN SUR LE SMARTPHONE)\n// ON MET L'IA EN PAUSE PENDANT 15 MINUTES POUR LAISSER L'HUMAIN DISCUTER !\n// =========================================================================\nif (fromMe) {\n  staticData.pausedUntil[remoteJid] = Date.now() + (15 * 60 * 1000); // 15 min de silence\n  return [];\n}\n\n// SI LA CONVERSATION EST ENCORE EN COURS DE PRISE EN MAIN HUMAINE : NE PAS RÉPONDRE\nif (staticData.pausedUntil[remoteJid] && Date.now() < staticData.pausedUntil[remoteJid]) {\n  return [];\n}\n\n// Extraction du texte envoyé par le client\nconst msg = data.message;\nif (!msg) return [];\n\nlet userText = msg.conversation || \n               msg.extendedTextMessage?.text || \n               msg.imageMessage?.caption || \n               msg.videoMessage?.caption || \n               msg.buttonsResponseMessage?.selectedButtonId || \n               msg.listResponseMessage?.singleSelectReply?.selectedRowId || \n               \"\";\n\nuserText = (userText || \"\").trim();\nif (!userText) return [];\n\n// Anti-doublon d'ID de message\nstaticData.processedIds = staticData.processedIds || [];\nconst msgId = key.id;\nif (msgId && staticData.processedIds.includes(msgId)) {\n  return [];\n}\nif (msgId) {\n  staticData.processedIds.push(msgId);\n  if (staticData.processedIds.length > 500) staticData.processedIds.shift();\n}\n\n// =========================================================================\n// GESTION DU CHOIX DE LA LANGUE DE SERVICE\n// =========================================================================\n// 1. Vérifier si le message est une sélection directe ou un clic de langue\nconst rawSelectedRow = msg.listResponseMessage?.singleSelectReply?.selectedRowId || \"\";\nlet selectedLang = null;\n\nif (rawSelectedRow === \"lang_kreyol\" || userText.toLowerCase().match(/^(krey[oò]l|kreyol ayisyen|pale krey[oò]l|an krey[oò]l|en cr[eé]ole|in creole)$/i)) {\n  selectedLang = \"kreyol\";\n} else if (rawSelectedRow === \"lang_francais\" || userText.toLowerCase().match(/^(fran[cç]ais|en fran[cç]ais|pale franse|parler fran[cç]ais|in french)$/i)) {\n  selectedLang = \"francais\";\n} else if (rawSelectedRow === \"lang_english\" || userText.toLowerCase().match(/^(english|anglais|in english|pale angle|speak english|en anglais)$/i)) {\n  selectedLang = \"english\";\n}\n\nif (selectedLang) {\n  staticData.userLanguage[remoteJid] = selectedLang;\n}\n\n// 2. Si le client demande explicitement à réafficher le menu de langue\nconst wantsMenu = userText.toLowerCase().match(/^(lang|langue|language|changer de langue|changer langue|chanje lang|change language|menu langue|menu lang)$/i);\nif (wantsMenu) {\n  delete staticData.userLanguage[remoteJid];\n}\n\nconst currentLang = staticData.userLanguage[remoteJid];\nconst needsLanguageMenu = !currentLang;\n\n// Si le client vient de choisir sa langue, on oriente le message pour un accueil parfait\nif (selectedLang) {\n  if (selectedLang === \"kreyol\") {\n    userText = \"Mwen chwazi Kreyòl Ayisyen. Byenvini m ak kè kontan epi mande m kisa m bezwen.\";\n  } else if (selectedLang === \"francais\") {\n    userText = \"J'ai choisi le Français. Souhaitez-moi la bienvenue chaleureusement et demandez-moi quel est mon besoin.\";\n  } else if (selectedLang === \"english\") {\n    userText = \"I have selected English. Please welcome me warmly and ask how you can assist me.\";\n  }\n}\n\n// Historique de discussion pour Gemini\nstaticData.conversations[remoteJid] = staticData.conversations[remoteJid] || [];\nconst history = staticData.conversations[remoteJid];\n\nreturn [{\n  json: {\n    senderPhone,\n    remoteJid,\n    pushName,\n    userText,\n    history,\n    currentLang: staticData.userLanguage[remoteJid] || \"francais\",\n    needsLanguageMenu,\n    isSystemAlert: false\n  }\n}];"
+        "jsCode": "// Filtrer, nettoyer et analyser le message entrant d'Evolution API\nconst body = $input.item.json.body || $input.item.json;\nconst staticData = $getWorkflowStaticData('global');\nstaticData.pausedUntil = staticData.pausedUntil || {};\nstaticData.conversations = staticData.conversations || {};\nstaticData.lastActive = staticData.lastActive || {};\nstaticData.recentBotTexts = staticData.recentBotTexts || {};\nstaticData.processedIds = staticData.processedIds || [];\n\nconst eventType = (body.event || \"\").toLowerCase();\n\n// 1. Gestion des événements de connexion / déconnexion\nif (eventType === \"connection.update\" || eventType === \"connection_update\") {\n  const state = (body.data?.state || body.data?.status || \"\").toLowerCase();\n  if (state === \"open\") {\n    delete staticData.lastDisconnectAlert;\n    return [];\n  }\n  if (state === \"close\" || state === \"disconnected\") {\n    const now = Date.now();\n    // Anti-spam alerte : maximum 1 e-mail toutes les 5 minutes\n    if (staticData.lastDisconnectAlert && (now - staticData.lastDisconnectAlert < 5 * 60 * 1000)) {\n      return [];\n    }\n    staticData.lastDisconnectAlert = now;\n    return [{\n      json: {\n        isSystemAlert: true,\n        alertType: \"DISCONNECTION\",\n        message: \"La session WhatsApp s'est déconnectée. Veuillez rescanner le QR code sur https://bot.technozi-ht.com/webhook/connect\"\n      }\n    }];\n  }\n  return [];\n}\n\n// 2. Traitement des messages uniquement\nif (eventType !== \"messages.upsert\" && eventType !== \"messages_upsert\") {\n  return [];\n}\n\nconst data = body.data;\nif (!data || !data.key) return [];\n\nconst key = data.key;\nconst remoteJid = key.remoteJid || \"\";\n\n// Ignorer les statuts WhatsApp, groupes et chaînes/newsletters\nif (\n  !remoteJid ||\n  remoteJid === \"status@broadcast\" ||\n  remoteJid.includes(\"@broadcast\") ||\n  remoteJid.includes(\"@g.us\") ||\n  remoteJid.includes(\"@newsletter\")\n) {\n  return [];\n}\n\n// Anti-doublon strict par ID de message\nconst msgId = key.id;\nif (msgId && staticData.processedIds.includes(msgId)) {\n  return [];\n}\nif (msgId) {\n  staticData.processedIds.push(msgId);\n  if (staticData.processedIds.length > 500) staticData.processedIds.shift();\n}\n\n// Déballer les messages éphémères, vue unique ou modifiés de WhatsApp\nlet msg = data.message;\nif (!msg) return [];\nif (msg.ephemeralMessage?.message) msg = msg.ephemeralMessage.message;\nif (msg.viewOnceMessage?.message) msg = msg.viewOnceMessage.message;\nif (msg.viewOnceMessageV2?.message) msg = msg.viewOnceMessageV2.message;\nif (msg.documentWithCaptionMessage?.message) msg = msg.documentWithCaptionMessage.message;\nif (msg.editedMessage?.message) msg = msg.editedMessage.message;\n\n// Ignorer les événements techniques silencieux (accusés, réactions, protocoles)\nif (msg.protocolMessage || msg.senderKeyDistributionMessage || msg.reactionMessage) {\n  return [];\n}\n\n// Extraire l'identifiant cliqué s'il s'agit d'un menu interactif (liste ou bouton)\nconst listRowId = (\n  msg.listResponseMessage?.singleSelectReply?.selectedRowId ||\n  msg.listResponseMessage?.rowId ||\n  msg.buttonsResponseMessage?.selectedButtonId ||\n  \"\"\n).trim();\n\n// Extraire le texte du message (y compris légendes photo/vidéo/document et position GPS)\nlet extractedText =\n  msg.conversation ||\n  msg.extendedTextMessage?.text ||\n  msg.imageMessage?.caption ||\n  msg.videoMessage?.caption ||\n  msg.documentMessage?.caption ||\n  msg.buttonsResponseMessage?.selectedDisplayText ||\n  msg.listResponseMessage?.title ||\n  listRowId ||\n  \"\";\n\nif (listRowId === \"menu_app\") {\n  extractedText = \"[CLIC SUR MENU : Télécharger l'Application Mobile] — Répondez dans la langue utilisée précédemment dans l'historique (ou en Français par défaut) en donnant immédiatement les deux liens directs Google Play (Android) et App Store (iPhone).\";\n} else if (listRowId === \"menu_site\") {\n  extractedText = \"[CLIC SUR MENU : Voir le Site Web Officiel] — Répondez dans la langue utilisée précédemment dans l'historique (ou en Français par défaut) en partageant directement le lien officiel https://technozi-ht.com et la Chaîne WhatsApp.\";\n} else if (listRowId === \"menu_horaires\") {\n  extractedText = \"[CLIC SUR MENU : Consulter Nos Horaires] — Répondez dans la langue utilisée précédemment dans l'historique (ou en Français par défaut) en donnant nos horaires d'ouverture et si nos bureaux sont actuellement ouverts ou fermés.\";\n}\n\nif (!extractedText && msg.locationMessage) {\n  const loc = msg.locationMessage;\n  extractedText = loc.address || loc.name ||\n    (loc.degreesLatitude ? `Position GPS partagée (${loc.degreesLatitude}, ${loc.degreesLongitude})` : \"\");\n}\n\nextractedText = (extractedText || \"\").trim();\nconst fromMe = key.fromMe === true;\n\n// =========================================================================\n// RÈGLE D'OR CO-PILOTE : GESTION DES MESSAGES VENANT DE NOTRE PROPRE NUMÉRO\n// =========================================================================\nif (fromMe) {\n  // Ignorer les échos d'envoi de menus interactifs par le bot lui-même\n  if (msg.listMessage || msg.buttonsMessage || msg.templateMessage || msg.interactiveMessage) {\n    return [];\n  }\n\n  // Vérifier si c'est simplement un écho de la réponse texte que le bot vient d'envoyer\n  const recentBot = (staticData.recentBotTexts[remoteJid] || []).filter(\n    item => Date.now() - item.at < 60000\n  );\n  staticData.recentBotTexts[remoteJid] = recentBot;\n\n  if (extractedText && recentBot.some(item => item.text === extractedText)) {\n    return [];\n  }\n\n  // Commande rapide /ia ou /bot depuis le téléphone pour réactiver l'IA immédiatement\n  if (extractedText.toLowerCase().match(/^(\\/ia|\\/bot|\\/resume)$/)) {\n    delete staticData.pausedUntil[remoteJid];\n    return [];\n  }\n\n  // Sinon, c'est un vrai humain de Technozi qui a répondu depuis le smartphone ou WhatsApp Web\n  const hasRealContent = Boolean(\n    extractedText ||\n    msg.audioMessage ||\n    msg.imageMessage ||\n    msg.videoMessage ||\n    msg.documentMessage ||\n    msg.contactMessage ||\n    msg.locationMessage\n  );\n\n  if (hasRealContent) {\n    staticData.pausedUntil[remoteJid] = Date.now() + (15 * 60 * 1000); // Pause IA de 15 minutes\n    // Mémoriser brièvement la réponse humaine pour la continuité si l'IA reprend plus tard\n    if (extractedText) {\n      staticData.conversations[remoteJid] = staticData.conversations[remoteJid] || [];\n      staticData.conversations[remoteJid].push({\n        role: \"model\",\n        text: \"[Réponse envoyée par un conseiller humain Technozi] : \" + extractedText\n      });\n      if (staticData.conversations[remoteJid].length > 16) {\n        staticData.conversations[remoteJid] = staticData.conversations[remoteJid].slice(-16);\n      }\n      staticData.lastActive[remoteJid] = Date.now();\n    }\n  }\n  return [];\n}\n\n// Si la conversation est en cours de prise en main humaine (< 15 min), l'IA reste silencieuse\nif (staticData.pausedUntil[remoteJid] && Date.now() < staticData.pausedUntil[remoteJid]) {\n  return [];\n}\n\n// Résoudre le numéro de téléphone réel (prise en charge des identifiants @lid récents)\nconst phoneJid = (key.remoteJidAlt && key.remoteJidAlt.includes(\"@s.whatsapp.net\"))\n  ? key.remoteJidAlt\n  : remoteJid;\nconst senderPhone = phoneJid.includes(\"@s.whatsapp.net\")\n  ? phoneJid.replace(\"@s.whatsapp.net\", \"\").replace(/[^0-9]/g, \"\")\n  : \"\";\nconst pushName = (data.pushName || \"\").trim() || \"Client\";\n\n// Expiration automatique de la mémoire de discussion après 12h d'inactivité\nif (staticData.lastActive[remoteJid] && (Date.now() - staticData.lastActive[remoteJid] > 12 * 60 * 60 * 1000)) {\n  delete staticData.conversations[remoteJid];\n}\nstaticData.lastActive[remoteJid] = Date.now();\n\nlet userText = extractedText;\n\n// Commande développeur / test (/reset) pour repartir sur une session vierge\nif (userText && userText.toLowerCase().match(/^(\\/reset|reset bot|reinitialiser)$/)) {\n  delete staticData.conversations[remoteJid];\n  userText = \"Bonjour ! (La session vient d'être réinitialisée pour test : accueillez-moi chaleureusement et brièvement comme au premier contact.)\";\n}\n\n// Gestion intelligente des messages vocaux audio et médias sans texte\nif (!userText) {\n  if (msg.audioMessage) {\n    userText = \"[MESSAGE VOCAL AUDIO REÇU] : Le client vient d'envoyer un message vocal audio sur WhatsApp que vous ne pouvez pas encore écouter en direct. Répondez-lui poliment et chaleureusement (dans la langue de l'historique, sinon brièvement en Kreyòl Ayisyen et Français) pour l'inviter à écrire sa demande par texte afin que vous l'aidiez tout de suite, et précisez qu'un conseiller Technozi écoutera aussi son vocal rapidement.\";\n  } else if (msg.imageMessage || msg.videoMessage || msg.documentMessage) {\n    userText = \"[FICHIER / PHOTO REÇU SANS TEXTE] : Le client vient d'envoyer une image, vidéo ou document sans texte d'accompagnement. Remerciez-le poliment pour l'envoi et demandez-lui de préciser par écrit sa demande ainsi que son nom et sa ville en Haïti.\";\n  } else {\n    return [];\n  }\n}\n\nstaticData.conversations[remoteJid] = staticData.conversations[remoteJid] || [];\nconst history = staticData.conversations[remoteJid];\nconst isNewConversation = history.length === 0;\n\nreturn [{\n  json: {\n    senderPhone,\n    remoteJid,\n    pushName,\n    userText,\n    history,\n    isNewConversation,\n    isSystemAlert: false\n  }\n}];"
       },
       "id": "filter-human-check",
       "name": "1. Filtre & Détecteur Humain",
@@ -97,7 +97,7 @@
       "typeVersion": 2,
       "position": [
         440,
-        420
+        440
       ]
     },
     {
@@ -117,7 +117,7 @@
       "typeVersion": 1,
       "position": [
         680,
-        420
+        440
       ]
     },
     {
@@ -140,61 +140,8 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        920,
-        240
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "boolean": [
-            {
-              "value1": "={{ $json.needsLanguageMenu }}",
-              "value2": true
-            }
-          ]
-        }
-      },
-      "id": "check-needs-language",
-      "name": "Doit choisir la langue ?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 1,
-      "position": [
-        920,
-        520
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "http://evolution-api:8080/message/sendList/technozi",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "apikey",
-              "value": "technozi_evolution_key_2026"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{\n          JSON.stringify({\n            number: $json.remoteJid,\n            title: \"Technozi Haïti (Faster & Easier)\",\n            description: \"Byenvini nan Technozi ! Tanpri chwazi lang sèvis ou pou n ka kòmanse.\\n\\nBienvenue chez Technozi ! Veuillez choisir votre langue de service pour commencer.\\n\\nWelcome to Technozi! Please select your service language to get started.\",\n            buttonText: \"🌐 Chwazi / Choisir / Select\",\n            footerText: \"Technozi - Faster & Easier\",\n            sections: [\n              {\n                title: \"Langues disponibles / Lang disponib\",\n                rows: [\n                  {\n                    rowId: \"lang_kreyol\",\n                    title: \"🇭🇹 Kreyòl Ayisyen\",\n                    description: \"Sèvis kliyan an Kreyòl\"\n                  },\n                  {\n                    rowId: \"lang_francais\",\n                    title: \"🇫🇷 Français\",\n                    description: \"Service client en Français\"\n                  },\n                  {\n                    rowId: \"lang_english\",\n                    title: \"🇺🇸 English\",\n                    description: \"Customer service in English\"\n                  }\n                ]\n              }\n            ]\n          })\n        }}",
-        "options": {
-          "timeout": 15000
-        }
-      },
-      "id": "send-language-menu",
-      "name": "Envoyer Menu Choix Langue",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        1200,
-        420
+        940,
+        260
       ]
     },
     {
@@ -216,9 +163,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ number: $json.remoteJid, presence: 'composing', delay: 3000 }) }}",
+        "jsonBody": "={{ JSON.stringify({ number: $json.remoteJid, presence: 'composing', delay: 1500 }) }}",
         "options": {
-          "timeout": 5000
+          "timeout": 4000
         }
       },
       "id": "send-presence-composing",
@@ -226,8 +173,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1200,
-        620
+        940,
+        440
       ],
       "continueOnFail": true
     },
@@ -246,31 +193,34 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{\n          (() => {\n            const userText = $json.userText;\n            const clientName = $json.pushName || \"Client\";\n            const phone = $json.senderPhone;\n            const history = $json.history || [];\n            const userLang = $json.currentLang || \"francais\";\n\n            const systemPrompt = `Vous êtes l'assistant d'accueil et de qualification officiel de Technozi Haïti (Faster & Easier).\nVotre rôle est d'accueillir chaque client avec une extrême gentillesse, un profond respect et un grand professionnalisme, d'écouter attentivement sa demande, et de noter proprement ses doléances pour l'équipe Technozi.\n\nRÈGLE D'OR N°1 : LANGUE SÉLECTIONNÉE PAR LE CLIENT (${userLang.toUpperCase()})\nLe client a choisi la langue : ${userLang}.\n• Si ${userLang} === \"kreyol\" : Répondez TOUJOURS en Kreyòl Ayisyen fluide, très poli, chaleureux et professionnel.\n• Si ${userLang} === \"francais\" : Répondez TOUJOURS en Français soigné, chaleureux, élégant et irréprochable.\n• Si ${userLang} === \"english\" : Répondez TOUJOURS en English impeccable, courtois et professionnel.\n\nRÈGLE D'OR N°2 : AUCUN PRIX NI TARIF FIXE\nNE DONNEZ JAMAIS DE PRIX ou d'estimation financière.\nSi le client demande un prix, expliquez-lui avec beaucoup de courtoisie que Technozi établit des devis sur-mesure selon la nature exacte de chaque projet et sa zone géographique en Haïti. Proposez-lui de recueillir ses détails pour que l'équipe Technozi prépare sa proposition exacte.\n\nRÈGLE D'OR N°3 : TOUS LES SERVICES DE TECHNOZI SONT ÉGAUX\nTechnozi est une entreprise technologique multi-services. Starlink n'est pas le seul produit. Le client est libre de demander ce qu'il souhaite :\n• Énergie Solaire & Systèmes de Secours (Onduleurs hybrides, batteries lithium, panneaux solaires)\n• Internet Satellitaire & Starlink (Kits officiels et installations soignées sur mât/toiture)\n• Caméras de Sécurité & Surveillance (Systèmes CCTV HD, vision nocturne, accès distant 24/7)\n• Réseaux Informatiques & Wi-Fi (Câblage structuré certifié, Wi-Fi professionnel pour entreprises et résidences)\n• Matériel & Équipements Informatiques (Laptops professionnels HP/Dell, ordinateurs de bureau, accessoires)\n• Support & Maintenance Informatique (Assistance technique, diagnostics, réparations)\n• Toute autre doléance ou demande technologique.\n\nRÈGLE D'OR N°4 : STYLE & SOBRIÉTÉ (Pas d'avalanche d'émojis ni de monotonie)\n• Soyez chaleureux et très poli, sans réponses robotiques copier-coller.\n• Évitez l'accumulation d'icônes : au maximum 1 ou 2 émojis discrets par message.\n• Privilégiez des phrases claires et bien aérées avec des puces (•).\n\nRÈGLE D'OR N°5 : RECUEIL DES COORDONNÉES\nRecueillez poliment auprès du client au fil de la discussion :\n1. Son Nom complet (ou Nom de son entreprise/organisation).\n2. Sa Ville / Zone géographique en Haïti (ex: Pétion-Ville, Delmas, Cap-Haïtien, etc.).\n3. Sa demande / doléance précise.\n\nRÈGLE D'OR N°6 : VÉRIFICATION DE FIN & FICHE RÉCAPITULATIVE\n1. Une fois que vous avez répondu à ses questions et noté son besoin :\nDemandez-lui gentiment s'il a terminé ou s'il souhaite ajouter d'autres précisions :\n• FR : \"Avez-vous d'autres précisions ou questions à ajouter, ou avons-nous fait le tour de votre demande ?\"\n• KR : \"Èske w gen yon lòt presizyon oswa kesyon ou ta renmen ajoute, oswa èske nou kouvri tout sa w te bezwen ?\"\n• EN : \"Do you have any other details or questions to add, or have we covered everything you need?\"\n\n2. Dès que le client confirme qu'il a terminé (\"C'est bon\", \"Non c'est tout\", \"M fini\", \"That's all\", \"Oui j'ai terminé\", etc.) :\nAffichez immédiatement la FICHE RÉCAPITULATIVE structurée suivante :\n\n📋 Récapitulatif de votre demande :\n• Client : [Nom ou Entreprise]\n• Téléphone : +${phone}\n• Ville / Zone : [Localisation indiquée]\n• Service / Demande : [Doléance précise exprimée par le client]\n• Précisions : [Détails ou contraintes particulières, ou \"Aucune\"]\n\nMerci beaucoup ! Vos informations sont bien enregistrées. Notre équipe Technozi révise votre dossier pour vous recontacter très rapidement.\n\n(Adaptez le texte du récapitulatif dans la langue du client).\n\nRÈGLE D'OR N°7 : CONCISION ET PHRASES TOUJOURS COMPLÈTES\n• Vos réponses doivent être concises, élégantes et directes (maximum 2 à 3 paragraphes courts).\n• Vous devez TOUJOURS terminer complètement vos phrases, vos questions et vos listes. Ne coupez JAMAIS une phrase en plein milieu.\n\nRÈGLE D'OR N°8 : CHANGEMENT DE LANGUE NATUREL\nSi à n'importe quel moment, le client vous demande de changer de langue (ex: \"Pouvez-vous me parler en créole ?\", \"Pale kreyòl pito\", \"Can we switch to English?\", \"M pa konprann, pale franse tanpri\") :\n• Basculez IMMÉDIATEMENT et avec beaucoup de gentillesse dans la nouvelle langue demandée.\n• Confirmez poliment la prise en compte du changement et poursuivez l'assistance avec naturel dans cette nouvelle langue.\n\nCoordonnées du client :\nNom WhatsApp : ${clientName}\nNuméro : +${phone}`;\n\n            // Construire les messages de contenu\n            const contents = [\n              { role: \"user\", parts: [{ text: systemPrompt }] },\n              { role: \"model\", parts: [{ text: \"Bien reçu et parfaitement compris. Je respecterai scrupuleusement la langue choisie par le client (\" + userLang + \"), sans jamais donner de prix et en terminant toujours mes phrases.\" }] }\n            ];\n\n            // Ajouter l'historique récent (6 derniers échanges)\n            for (const h of history.slice(-6)) {\n              contents.push({ role: h.role, parts: [{ text: h.text }] });\n            }\n\n            // Message actuel du client\n            contents.push({ role: \"user\", parts: [{ text: userText }] });\n\n            return {\n              contents: contents,\n              generationConfig: {\n                temperature: 0.35,\n                maxOutputTokens: 2048\n              }\n            };\n          })()\n        }}",
+        "jsonBody": "={{\n          (() => {\n            const userText = $json.userText;\n            const clientName = $json.pushName || \"Client\";\n            const phone = $json.senderPhone;\n            const phoneDisplay = phone ? (\"+\" + phone) : \"Non visible\";\n            const history = $json.history || [];\n            const isNewConversation = $json.isNewConversation === true || history.length === 0;\n\n            let haitiTimeInfo = \"\";\n            try {\n              const now = new Date();\n              const jour = now.toLocaleDateString('fr-FR', { timeZone: 'America/Port-au-Prince', weekday: 'long' });\n              const heure = now.toLocaleTimeString('fr-FR', { timeZone: 'America/Port-au-Prince', hour: '2-digit', minute: '2-digit' });\n              haitiTimeInfo = jour + \" à \" + heure + \" (heure d'Haïti)\";\n            } catch (e) {\n              haitiTimeInfo = \"Haïti\";\n            }\n\n            const firstTurnInstruction = isNewConversation\n              ? \"STATUT DE LA DISCUSSION : PREMIER MESSAGE (DÉBUT DE CONVERSATION).\\nUn menu interactif CLIQUABLE (Télécharger l'App, Voir le Site Web, Nos Horaires) va être envoyé juste en dessous de votre message. Rédigez donc un accueil court, chaleureux et naturel (ou répondez directement à sa question s'il en pose déjà une), SANS écrire vous-même de liste numérotée 1/2/3.\"\n              : \"STATUT DE LA DISCUSSION : CONVERSATION EN COURS.\";\n\n            const systemPrompt = `Vous êtes Pitonbot, l'assistant virtuel intelligent de Technozi Haïti (\"Faster & Easier\") sur WhatsApp.\nVotre mission est d'accueillir chaque client avec chaleur, respect et intelligence, de répondre avec exactitude à ses questions sur Technozi, et de qualifier proprement sa demande pour notre équipe.\n\n1. LANGUE PERÇUE & ADAPTATION AUTOMATIQUE (ZÉRO MENU)\n• Aucun menu de sélection de langue n'existe : détectez automatiquement la langue perçue dans le message du client (Kreyòl Ayisyen, Français, English, ou Español) et répondez NATURELLEMENT dans cette même langue.\n• Si le client écrit dans une autre langue en plein milieu de la discussion (ex: commence en français puis écrit en créole ou en anglais), suivez-le immédiatement et naturellement dans sa nouvelle langue.\n• Si le client mélange Kreyòl et Français, répondez dans la langue dominante avec beaucoup d'aisance.\n• Qualité linguistique :\n  - Kreyòl Ayisyen : créole haïtien authentique, poli, fluide et naturel en Haïti (utilisez \"Bonjou\" ou \"Bonswa\" selon l'heure locale ci-dessous, \"Mèsi dèske w kontakte Technozi\", \"Kòman nou ka ede w ?\", etc.).\n  - Français : français soigné, chaleureux, clair et irréprochable.\n  - English : natural, courteous, and professional English.\n\n2. RÈGLE ABSOLUE : AUCUN PRIX NI ESTIMATION FINANCIÈRE\n• Ne donnez JAMAIS de prix, ni de fourchette tarifaire, ni de montant estimatif en dollars ou en gourdes.\n• Si le client demande un prix, expliquez avec tact que Technozi prépare des devis sur-mesure selon les caractéristiques exactes de chaque besoin et la zone d'intervention en Haïti, puis proposez de recueillir quelques détails pour lui établir une proposition précise.\n\n3. BASE DE CONNAISSANCES OFFICIELLE TECHNOZI HAÏTI (NE RIEN INVENTER)\nTechnozi est une entreprise technologique multi-services. Starlink n'est qu'un produit parmi d'autres. Voici nos 6 domaines d'expertise (tous à égalité) :\n• Énergie Solaire & Secours Hybride : panneaux solaires, onduleurs hybrides, batteries lithium pour maisons, bureaux et commerces.\n• Internet Satellitaire & Starlink : kits officiels, installation soignée sur mât/toiture, orientation et distribution Wi-Fi.\n• Vidéosurveillance & Sécurité (CCTV) : caméras IP HD, vision nocturne, enregistreurs NVR, accès à distance sur smartphone 24/7.\n• Réseaux Informatiques & Wi-Fi Pro : câblage structuré certifié, baies de brassage, routeurs/switchs, couverture Wi-Fi multi-zones.\n• Matériel & Équipements Informatiques : laptops professionnels (HP, Dell...), ordinateurs fixes, serveurs, écrans, imprimantes, routeurs, SSD et accessoires.\n• Support & Maintenance Informatique : diagnostic, réparation, infogérance et assistance technique.\n\nCoordonnées officielles vérifiées :\n• Site Web : https://technozi-ht.com\n• Téléphone / WhatsApp commercial : +509 37 03 0009\n• E-mail : sales@technozi-ht.com\n• Horaires : Lundi au Vendredi de 8h00 à 17h00 | Samedi de 8h00 à 15h00 | Dimanche fermé.\n• Application Mobile officielle :\n  - Android (Google Play) : https://play.google.com/store/apps/details?id=com.wiserpos.technozi&hl=en_SG\n  - iPhone / iOS (App Store) : https://apps.apple.com/us/app/technozi-haiti/id6756228637?l=es-MX\n• Chaîne WhatsApp : https://whatsapp.com/channel/0029Vb7XDp3EVccQG29idN2d\n\nInterdiction d'hallucination : N'inventez jamais de prix, ni de disponibilité de stock en temps réel, ni d'adresse physique de rue non mentionnée ci-dessus, ni de délais fermes sans validation de l'équipe.\n\n4. INTELLIGENCE CONVERSATIONNELLE, MENU RAPIDE & QUALIFICATION NATURELLE\n• ${firstTurnInstruction}\n• Gestion intelligente des choix du Menu Rapide (si le client vient de recevoir le Menu Rapide et répond 1, 2 ou 3, ou demande l'un de ces éléments) :\n  - Choix 1 (Télécharger l'Application Mobile) : donnez immédiatement les deux liens officiels bien présentés :\n    • Android (Google Play) : https://play.google.com/store/apps/details?id=com.wiserpos.technozi&hl=en_SG\n    • iPhone / iOS (App Store) : https://apps.apple.com/us/app/technozi-haiti/id6756228637?l=es-MX\n  - Choix 2 (Voir le Site Web) : partagez le lien officiel https://technozi-ht.com (et éventuellement la Chaîne WhatsApp officielle https://whatsapp.com/channel/0029Vb7XDp3EVccQG29idN2d).\n  - Choix 3 (Nos Horaires) : donnez nos horaires d'ouverture (Lun–Ven : 8h00 – 17h00, Samedi : 8h00 – 15h00, Dimanche : Fermé) et indiquez gentiment si nos bureaux sont actuellement ouverts ou fermés selon l'heure locale d'Haïti !\n  - Attention au contexte : si vous venez juste de demander une quantité (ex: \"Combien de caméras ?\") et que le client écrit \"2\", c'est bien sûr une quantité et non l'option 2 du menu !\n• Premier contact simple (\"Bonjou\", \"Bonjour\", \"Hello\") : accueillez chaleureusement au nom de Technozi Haïti et demandez brièvement comment nous pouvons l'aider aujourd'hui (évitez les longs pavés).\n• Répondez directement à la question posée avant d'en poser une autre.\n• Ne redemandez JAMAIS une information que le client a déjà mentionnée dans la discussion.\n• Pour une demande de produit, installation ou devis, recueillez naturellement (1 à 2 questions courtes maximum par message, jamais d'interrogatoire) :\n  1. Son Nom complet (ou le nom de son entreprise / organisation).\n  2. Sa Ville ou Zone en Haïti (ex: Pétion-Ville, Delmas, Tabarre, Cap-Haïtien...).\n  3. Le service/équipement précis et les précisions utiles selon le cas (ex: nombre de caméras, type de bâtiment, usages électriques pour le solaire, modèle/quantité de matériel, etc.).\n\n5. CLÔTURE & FICHE RÉCAPITULATIVE (POUR DEVIS / COMMANDES)\n• Une fois les éléments clés réunis, demandez-lui gentiment dans sa langue s'il a d'autres précisions ou questions à ajouter, ou s'il a terminé.\n• Dès qu'il confirme qu'il a terminé (ou valide clairement la fin), affichez la Fiche Récapitulative structurée dans sa langue, prête à être relue et transmise à l'équipe :\n\n📋 *Récapitulatif de votre demande* (adaptez les libellés en Kreyòl ou English si le client parle Kreyòl ou English) :\n• *Client* : [Nom / Entreprise]\n• *Téléphone* : ${phoneDisplay}\n• *Ville / Zone* : [Ville ou quartier indiqué]\n• *Service / Demande* : [Besoin exprimé]\n• *Précisions* : [Détails techniques utiles ou \"Aucune\"]\n\nAjoutez une courte phrase chaleureuse confirmant que l'équipe Technozi prend le relais rapidement.\n\n6. FORMATAGE WHATSAPP, SOBRIÉTÉ & PHRASES TOUJOURS COMPLÈTES\n• Format WhatsApp natif : utilisez *gras* avec UNE SEULE étoile (n'utilisez JAMAIS **double étoile** ni ### titres Markdown).\n• Restez sobre : 0 à 2 émojis discrets maximum par message, style humain, poli et fluide.\n• Concision : maximum 2 à 3 paragraphes courts bien aérés.\n• Terminez TOUJOURS complètement vos phrases et vos listes. Ne coupez jamais une phrase au milieu.\n\nContexte actuel :\n• Date / Heure locale : ${haitiTimeInfo}\n• Nom WhatsApp affiché : ${clientName}\n• Numéro client : ${phoneDisplay}`;\n\n            const contents = [\n              { role: \"user\", parts: [{ text: systemPrompt }] },\n              { role: \"model\", parts: [{ text: \"Bien reçu. Je détecterai automatiquement la langue du client (Kreyòl, Français, English ou autre), je répondrai avec intelligence et sobriété au nom de Technozi Haïti sans jamais donner de prix, et je terminerai toujours toutes mes phrases.\" }] }\n            ];\n\n            for (const h of history.slice(-16)) {\n              contents.push({ role: h.role, parts: [{ text: h.text }] });\n            }\n\n            contents.push({ role: \"user\", parts: [{ text: userText }] });\n\n            return {\n              contents: contents,\n              generationConfig: {\n                temperature: 0.4,\n                maxOutputTokens: 2048\n              }\n            };\n          })()\n        }}",
         "options": {
           "timeout": 20000
         }
       },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
       "id": "call-gemini",
       "name": "2. Cerveau IA Gemini (Gratuit)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1200,
-        780
+        940,
+        620
       ]
     },
     {
       "parameters": {
-        "jsCode": "// Parser la réponse de Gemini\nconst geminiRes = $input.item.json;\nconst candidate = geminiRes.candidates?.[0];\nlet aiText = candidate?.content?.parts?.[0]?.text || \"Merci pour votre message. L'équipe Technozi a bien reçu votre demande et vous répondra très rapidement.\";\n\nconst prevData = $('1. Filtre & Détecteur Humain').item.json;\nconst remoteJid = prevData.remoteJid;\nconst senderPhone = prevData.senderPhone;\nconst userText = prevData.userText;\n\n// Mettre à jour l'historique de conversation\nconst staticData = $getWorkflowStaticData('global');\nstaticData.conversations = staticData.conversations || {};\nstaticData.conversations[remoteJid] = staticData.conversations[remoteJid] || [];\n\nstaticData.conversations[remoteJid].push({ role: \"user\", text: userText });\nstaticData.conversations[remoteJid].push({ role: \"model\", text: aiText });\n\n// Garder maximum les 12 derniers échanges en mémoire\nif (staticData.conversations[remoteJid].length > 12) {\n  staticData.conversations[remoteJid] = staticData.conversations[remoteJid].slice(-12);\n}\n\nreturn [{\n  json: {\n    remoteJid,\n    senderPhone,\n    aiText\n  }\n}];"
+        "jsCode": "// Parser proprement la réponse de Gemini et gérer les garde-fous WhatsApp\nconst geminiRes = $input.item.json;\nconst candidate = geminiRes.candidates?.[0];\nconst parts = candidate?.content?.parts || [];\nconst visibleParts = parts\n  .filter(p => !p.thought && typeof p.text === \"string\")\n  .map(p => p.text);\n\nlet aiText = (visibleParts.join(\"\\n\") || candidate?.content?.parts?.[0]?.text || \"\").trim();\n\n// Récupération sécurisée du nœud filtre (résiste même en cas de renommage n8n ...1)\nlet prevData = null;\nfor (const nodeName of ['1. Filtre & Détecteur Humain', '1. Filtre & Détecteur Humain1', '1. Filtre & Détecteur Humain2']) {\n  try {\n    const item = $(nodeName).item;\n    if (item && item.json && item.json.remoteJid) {\n      prevData = item.json;\n      break;\n    }\n  } catch (e) {}\n}\nif (!prevData) {\n  throw new Error(\"Données introuvables depuis '1. Filtre & Détecteur Humain'. Videz les doublons du canevas n8n si nécessaire.\");\n}\n\nconst remoteJid = prevData.remoteJid;\nconst senderPhone = prevData.senderPhone;\nconst userText = prevData.userText;\nconst isNewConversation = prevData.isNewConversation === true;\n\n// Nettoyage léger au cas où Gemini glisserait une syntaxe Markdown non-WhatsApp\nif (aiText) {\n  aiText = aiText\n    .replace(/\\[SET_LANG:.*?\\]/gi, \"\")\n    .replace(/\\*\\*([^*\\n]+?)\\*\\*/g, \"*$1*\")\n    .replace(/^#{1,4}\\s+/gm, \"\")\n    .trim();\n}\n\n// Secours multilingue si la réponse IA était vide\nif (!aiText) {\n  const lower = (userText || \"\").toLowerCase();\n  if (/\\b(mwen|kreyol|kreyòl|bonjou|bonswa|konbyen|enstalasyon|oubyen|tanpri|bezwen)\\b/i.test(lower)) {\n    aiText = \"Mèsi dèske w kontakte *Technozi Haïti*. Nou kontan akeyi w jodi a.\";\n  } else if (/\\b(hello|hi|how|much|price|need|please|want|solar|can|english|what|where)\\b/i.test(lower)) {\n    aiText = \"Thank you for contacting *Technozi Haïti*. Welcome! How can we assist you today?\";\n  } else {\n    aiText = \"Merci d'avoir contacté *Technozi Haïti*. Bienvenue ! Comment pouvons-nous vous aider aujourd'hui ?\";\n  }\n}\n\n// Préparer le Menu Interactif Cliquable (sendList) et un texte de secours si début de conversation\nconst detectLang = (text) => {\n  const s = (text || \"\").toLowerCase();\n  if (/\\b(bonjou|bonswa|byenvini|kòman|koman|mèsi|dèske|deske|akeyi|bezwen|tanpri|kisa|pou w|ede w|avè w|souple|konbyen|enstalasyon|panno|kamera|solè|sole)\\b/i.test(s)) return \"kr\";\n  if (/\\b(hello|welcome|how can i|how may i|assist you|help you|thank you|good morning|good afternoon|good evening|please|need|want)\\b/i.test(s)) return \"en\";\n  if (/\\b(hola|bienvenido|buenos días|buenas tardes|cómo puedo|en qué puedo|gracias por|ayudarle)\\b/i.test(s)) return \"es\";\n  return \"\";\n};\nconst menuLang = detectLang(aiText) || detectLang(userText) || \"fr\";\n\nlet listPayload = null;\nlet fallbackMenuText = \"\";\n\nif (isNewConversation) {\n  if (menuLang === \"kr\") {\n    listPayload = {\n      number: remoteJid,\n      title: \"Technozi Haïti\",\n      description: \"Klike sou bouton ki anba a pou w chwazi sa w vle, oswa ekri nou dirèkteman :\",\n      buttonText: \"📋 Meni Rapid\",\n      footerText: \"Technozi - Faster & Easier\",\n      sections: [{\n        title: \"Aksè Rapid\",\n        rows: [\n          { title: \"📱 Telechaje App la\", description: \"Aplikasyon Android ak iPhone\", rowId: \"menu_app\" },\n          { title: \"🌐 Gade Sit Wèb la\", description: \"Vizite technozi-ht.com\", rowId: \"menu_site\" },\n          { title: \"🕒 Orè Travay Nou\", description: \"Lè biwo nou yo louvri\", rowId: \"menu_horaires\" }\n        ]\n      }]\n    };\n    fallbackMenuText = \"📌 *Meni Rapid :*\\n1 - 📱 Telechaje Aplikasyon Mobil lan\\n2 - 🌐 Gade Sit Wèb Ofisyèl la\\n3 - 🕒 Wè Orè Travay Nou yo\\n\\n_Reponn *1*, *2* oswa *3*._\";\n  } else if (menuLang === \"en\") {\n    listPayload = {\n      number: remoteJid,\n      title: \"Technozi Haïti\",\n      description: \"Tap the button below to select an option, or write to us directly:\",\n      buttonText: \"📋 Quick Menu\",\n      footerText: \"Technozi - Faster & Easier\",\n      sections: [{\n        title: \"Quick Access\",\n        rows: [\n          { title: \"📱 Download the App\", description: \"Android & iPhone mobile app\", rowId: \"menu_app\" },\n          { title: \"🌐 Visit Website\", description: \"Visit technozi-ht.com\", rowId: \"menu_site\" },\n          { title: \"🕒 Opening Hours\", description: \"Business opening hours\", rowId: \"menu_horaires\" }\n        ]\n      }]\n    };\n    fallbackMenuText = \"📌 *Quick Menu:*\\n1 - 📱 Download our Mobile App\\n2 - 🌐 Visit our Official Website\\n3 - 🕒 View our Opening Hours\\n\\n_Reply *1*, *2* or *3*._\";\n  } else if (menuLang === \"es\") {\n    listPayload = {\n      number: remoteJid,\n      title: \"Technozi Haïti\",\n      description: \"Toque el botón de abajo para elegir una opción o escríbanos directamente:\",\n      buttonText: \"📋 Menú Rápido\",\n      footerText: \"Technozi - Faster & Easier\",\n      sections: [{\n        title: \"Acceso Rápido\",\n        rows: [\n          { title: \"📱 Descargar la App\", description: \"Aplicación Android y iPhone\", rowId: \"menu_app\" },\n          { title: \"🌐 Ver Sitio Web\", description: \"Visitar technozi-ht.com\", rowId: \"menu_site\" },\n          { title: \"🕒 Nuestros Horarios\", description: \"Horarios de atención\", rowId: \"menu_horaires\" }\n        ]\n      }]\n    };\n    fallbackMenuText = \"📌 *Menú Rápido:*\\n1 - 📱 Descargar nuestra App Móvil\\n2 - 🌐 Ver el Sitio Web Oficial\\n3 - 🕒 Ver Nuestros Horarios\\n\\n_Responda *1*, *2* o *3*._\";\n  } else {\n    listPayload = {\n      number: remoteJid,\n      title: \"Technozi Haïti\",\n      description: \"Cliquez sur le bouton ci-dessous pour choisir une option, ou écrivez-nous directement :\",\n      buttonText: \"📋 Menu Rapide\",\n      footerText: \"Technozi - Faster & Easier\",\n      sections: [{\n        title: \"Accès Rapide\",\n        rows: [\n          { title: \"📱 Télécharger l'App\", description: \"Application Android & iPhone\", rowId: \"menu_app\" },\n          { title: \"🌐 Voir le Site Web\", description: \"Visiter technozi-ht.com\", rowId: \"menu_site\" },\n          { title: \"🕒 Nos Horaires\", description: \"Heures d'ouverture du bureau\", rowId: \"menu_horaires\" }\n        ]\n      }]\n    };\n    fallbackMenuText = \"📌 *Menu Rapide :*\\n1 - 📱 Télécharger l'Application Mobile\\n2 - 🌐 Voir le Site Web Officiel\\n3 - 🕒 Consulter Nos Horaires\\n\\n_Répondez *1*, *2* ou *3*._\";\n  }\n}\n\nconst staticData = $getWorkflowStaticData('global');\nstaticData.conversations = staticData.conversations || {};\nstaticData.recentBotTexts = staticData.recentBotTexts || {};\n\n// Enregistrer ce message pour ne pas confondre l'écho du bot avec une réponse humaine (fromMe)\nstaticData.recentBotTexts[remoteJid] = (staticData.recentBotTexts[remoteJid] || []).filter(\n  item => Date.now() - item.at < 60000\n);\nstaticData.recentBotTexts[remoteJid].push({ text: aiText, at: Date.now() });\nif (staticData.recentBotTexts[remoteJid].length > 5) {\n  staticData.recentBotTexts[remoteJid].shift();\n}\n\n// Mettre à jour l'historique de conversation (16 messages = 8 allers-retours complets)\nstaticData.conversations[remoteJid] = staticData.conversations[remoteJid] || [];\nstaticData.conversations[remoteJid].push({ role: \"user\", text: userText });\nstaticData.conversations[remoteJid].push({ role: \"model\", text: aiText });\n\nif (staticData.conversations[remoteJid].length > 16) {\n  staticData.conversations[remoteJid] = staticData.conversations[remoteJid].slice(-16);\n}\n\nreturn [{\n  json: {\n    remoteJid,\n    senderPhone,\n    aiText,\n    isNewConversation,\n    listPayload,\n    fallbackMenuText\n  }\n}];"
       },
       "id": "parse-ai-reply",
       "name": "3. Parser Réponse IA",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1440,
-        780
+        1200,
+        620
       ]
     },
     {
@@ -302,9 +252,117 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1680,
-        780
+        1440,
+        520
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isNewConversation }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-new-conversation",
+      "name": "Début de conversation ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        740
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://evolution-api:8080/message/sendList/technozi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "technozi_evolution_key_2026"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.listPayload) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "send-clickable-menu",
+      "name": "5. Envoyer Menu Cliquable",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        740
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ Boolean($json.error) }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-menu-failed",
+      "name": "Menu Cliquable Échoué ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        740
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://evolution-api:8080/message/sendText/technozi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "technozi_evolution_key_2026"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n          (() => {\n            let p = null;\n            for (const n of ['3. Parser Réponse IA', '3. Parser Réponse IA1', '3. Parser Réponse IA2']) {\n              try {\n                const it = $(n).item;\n                if (it && it.json && it.json.remoteJid) { p = it.json; break; }\n              } catch (e) {}\n            }\n            return JSON.stringify({\n              number: p ? p.remoteJid : '',\n              text: p ? p.fallbackMenuText : ''\n            });\n          })()\n        }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "send-menu-fallback-text",
+      "name": "5b. Envoyer Menu Texte (Secours)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        740
+      ],
+      "continueOnFail": true
     }
   ],
   "connections": {
@@ -363,24 +421,6 @@
         ],
         [
           {
-            "node": "Doit choisir la langue ?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Doit choisir la langue ?": {
-      "main": [
-        [
-          {
-            "node": "Envoyer Menu Choix Langue",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
             "node": "Afficher 'En train d'écrire...'",
             "type": "main",
             "index": 0
@@ -411,8 +451,48 @@
             "node": "4. Envoyer Réponse WhatsApp",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Début de conversation ?",
+            "type": "main",
+            "index": 0
           }
         ]
+      ]
+    },
+    "Début de conversation ?": {
+      "main": [
+        [
+          {
+            "node": "5. Envoyer Menu Cliquable",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "5. Envoyer Menu Cliquable": {
+      "main": [
+        [
+          {
+            "node": "Menu Cliquable Échoué ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Menu Cliquable Échoué ?": {
+      "main": [
+        [
+          {
+            "node": "5b. Envoyer Menu Texte (Secours)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
       ]
     }
   },
