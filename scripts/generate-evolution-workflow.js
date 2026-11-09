@@ -213,7 +213,244 @@ if (eventType === "connection.update" || eventType === "connection_update") {
   return [];
 }
 
-// 2. Traitement des messages uniquement
+// Helper SHA-256 autonome (sans require) pour décoder les votes de sondages WhatsApp s'ils arrivent hachés
+function utf8Bytes(str) {
+  const out = [];
+  for (let i = 0; i < str.length; i++) {
+    let code = str.charCodeAt(i);
+    if (code < 0x80) {
+      out.push(code);
+    } else if (code < 0x800) {
+      out.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+    } else if (code >= 0xd800 && code <= 0xdbff && i + 1 < str.length) {
+      const next = str.charCodeAt(++i);
+      const cp = 0x10000 + (((code & 0x3ff) << 10) | (next & 0x3ff));
+      out.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+    } else {
+      out.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+    }
+  }
+  return out;
+}
+function sha256DigestBytes(bytes) {
+  const K = [
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+  ];
+  const H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  const msgBytes = bytes.slice();
+  const bitLen = msgBytes.length * 8;
+  msgBytes.push(0x80);
+  while ((msgBytes.length % 64) !== 56) msgBytes.push(0);
+  const hi = Math.floor(bitLen / 4294967296);
+  const lo = bitLen >>> 0;
+  msgBytes.push((hi >>> 24) & 255, (hi >>> 16) & 255, (hi >>> 8) & 255, hi & 255);
+  msgBytes.push((lo >>> 24) & 255, (lo >>> 16) & 255, (lo >>> 8) & 255, lo & 255);
+  const rrot = (v, n) => (v >>> n) | (v << (32 - n));
+  for (let i = 0; i < msgBytes.length; i += 64) {
+    const w = new Array(64);
+    for (let j = 0; j < 16; j++) {
+      w[j] = (msgBytes[i + j * 4] << 24) | (msgBytes[i + j * 4 + 1] << 16) | (msgBytes[i + j * 4 + 2] << 8) | msgBytes[i + j * 4 + 3];
+    }
+    for (let j = 16; j < 64; j++) {
+      const s0 = rrot(w[j - 15], 7) ^ rrot(w[j - 15], 18) ^ (w[j - 15] >>> 3);
+      const s1 = rrot(w[j - 2], 17) ^ rrot(w[j - 2], 19) ^ (w[j - 2] >>> 10);
+      w[j] = (w[j - 16] + s0 + w[j - 7] + s1) | 0;
+    }
+    let [a, b, c, d, e, f, g, h] = H;
+    for (let j = 0; j < 64; j++) {
+      const S1 = rrot(e, 6) ^ rrot(e, 11) ^ rrot(e, 25);
+      const ch = (e & f) ^ ((~e) & g);
+      const t1 = (h + S1 + ch + K[j] + w[j]) | 0;
+      const S0 = rrot(a, 2) ^ rrot(a, 13) ^ rrot(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (S0 + maj) | 0;
+      h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+    }
+    H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+    H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+  }
+  const out = [];
+  for (const x of H) out.push((x >>> 24) & 255, (x >>> 16) & 255, (x >>> 8) & 255, x & 255);
+  return out;
+}
+function bytesToHex(bytes) {
+  return bytes.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function bytesToBase64(bytes) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let res = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < bytes.length ? bytes[i + 1] : 0;
+    const b2 = i + 2 < bytes.length ? bytes[i + 2] : 0;
+    const n = (b0 << 16) | (b1 << 8) | b2;
+    res += chars[(n >> 18) & 63] + chars[(n >> 12) & 63] +
+      (i + 1 < bytes.length ? chars[(n >> 6) & 63] : '=') +
+      (i + 2 < bytes.length ? chars[n & 63] : '=');
+  }
+  return res;
+}
+
+const POLL_CHOICES = [
+  { id: "menu_app", text: "📱 Télécharger l'App Mobile" },
+  { id: "menu_site", text: "🌐 Voir le Site Web Officiel" },
+  { id: "menu_horaires", text: "🕒 Consulter Nos Horaires" },
+  { id: "menu_app", text: "📱 Telechaje App Mobil lan" },
+  { id: "menu_site", text: "🌐 Gade Sit Wèb Ofisyèl la" },
+  { id: "menu_horaires", text: "🕒 Wè Orè Travay Nou yo" },
+  { id: "menu_app", text: "📱 Download Mobile App" },
+  { id: "menu_site", text: "🌐 Visit Official Website" },
+  { id: "menu_horaires", text: "🕒 View Opening Hours" },
+  { id: "menu_app", text: "📱 Descargar App Móvil" },
+  { id: "menu_site", text: "🌐 Ver Sitio Web Oficial" },
+  { id: "menu_horaires", text: "🕒 Ver Nuestros Horarios" }
+];
+const POLL_LOOKUP = {};
+for (const c of POLL_CHOICES) {
+  const digest = sha256DigestBytes(utf8Bytes(c.text));
+  POLL_LOOKUP[c.text.toLowerCase()] = c.id;
+  POLL_LOOKUP[bytesToBase64(digest)] = c.id;
+  POLL_LOOKUP[bytesToHex(digest)] = c.id;
+}
+function resolvePollOption(val) {
+  if (!val) return "";
+  if (typeof val === "string") {
+    const trimmed = val.trim();
+    if (POLL_LOOKUP[trimmed]) return POLL_LOOKUP[trimmed];
+    if (POLL_LOOKUP[trimmed.toLowerCase()]) return POLL_LOOKUP[trimmed.toLowerCase()];
+    const lower = trimmed.toLowerCase();
+    if (/\\b(app|mobil|android|iphone|telechaje|télécharger|download|descargar)\\b/i.test(lower)) return "menu_app";
+    if (/\\b(site|sit wèb|website|sitio|technozi-ht)\\b/i.test(lower)) return "menu_site";
+    if (/\\b(horaire|horarios|hours|orè|lè biwo)\\b/i.test(lower)) return "menu_horaires";
+    return "";
+  }
+  let byteArr = null;
+  if (Array.isArray(val)) byteArr = val;
+  else if (val && val.type === "Buffer" && Array.isArray(val.data)) byteArr = val.data;
+  else if (val && typeof val === "object" && typeof val[0] === "number") {
+    byteArr = [];
+    for (let k = 0; typeof val[k] === "number"; k++) byteArr.push(val[k]);
+  }
+  if (byteArr && byteArr.length > 0) {
+    const b64 = bytesToBase64(byteArr);
+    const hx = bytesToHex(byteArr);
+    return POLL_LOOKUP[b64] || POLL_LOOKUP[hx] || "";
+  }
+  return "";
+}
+function mapMenuActionText(actionId) {
+  if (actionId === "menu_app") {
+    return "[CLIC SUR MENU : Télécharger l'Application Mobile] — Répondez dans la langue utilisée précédemment dans l'historique (ou en Français par défaut) en donnant immédiatement les deux liens directs Google Play (Android) et App Store (iPhone).";
+  }
+  if (actionId === "menu_site") {
+    return "[CLIC SUR MENU : Voir le Site Web Officiel] — Répondez dans la langue utilisée précédemment dans l'historique (ou en Français par défaut) en partageant directement le lien officiel https://technozi-ht.com et la Chaîne WhatsApp.";
+  }
+  if (actionId === "menu_horaires") {
+    return "[CLIC SUR MENU : Consulter Nos Horaires] — Répondez dans la langue utilisée précédemment dans l'historique (ou en Français par défaut) en donnant nos horaires d'ouverture et si nos bureaux sont actuellement ouverts ou fermés.";
+  }
+  return "";
+}
+
+// 2. Gestion des clics sur Sondage WhatsApp (messages.update)
+if (eventType === "messages.update" || eventType === "messages_update") {
+  const updates = Array.isArray(body.data) ? body.data : (body.data ? [body.data] : []);
+  for (const upd of updates) {
+    if (!upd) continue;
+    const pollUpdates = upd.pollUpdates || upd.update?.pollUpdates || [];
+    if (!Array.isArray(pollUpdates) || pollUpdates.length === 0) continue;
+
+    let remoteJid = upd.remoteJid || upd.key?.remoteJid || "";
+    if (
+      !remoteJid ||
+      remoteJid === "status@broadcast" ||
+      remoteJid.includes("@broadcast") ||
+      remoteJid.includes("@g.us") ||
+      remoteJid.includes("@newsletter")
+    ) {
+      continue;
+    }
+
+    let matchedActionId = "";
+    let voteTs = "";
+    let pollCreationId = upd.keyId || upd.key?.id || "";
+
+    // Format agrégé : [{ name: "...", voters: [...] }]
+    const aggregateHit = pollUpdates.find(pu => pu && pu.name && Array.isArray(pu.voters) && pu.voters.length > 0);
+    if (aggregateHit) {
+      matchedActionId = resolvePollOption(aggregateHit.name);
+      voteTs = String(upd.messageTimestamp || Date.now());
+    } else {
+      // Format brut Baileys : [{ pollCreationMessageKey, vote: { selectedOptions, name }, senderTimestampMs }]
+      for (let idx = pollUpdates.length - 1; idx >= 0; idx--) {
+        const pu = pollUpdates[idx];
+        if (!pu) continue;
+        if (pu.pollCreationMessageKey?.id) pollCreationId = pu.pollCreationMessageKey.id;
+        if (pu.senderTimestampMs) voteTs = String(pu.senderTimestampMs);
+        const candidates = [];
+        if (pu.vote?.name) candidates.push(pu.vote.name);
+        if (pu.optionName) candidates.push(pu.optionName);
+        if (Array.isArray(pu.vote?.selectedOptions)) candidates.push(...pu.vote.selectedOptions);
+        if (Array.isArray(pu.selectedOptions)) candidates.push(...pu.selectedOptions);
+        for (const c of candidates) {
+          const hit = resolvePollOption(c);
+          if (hit) { matchedActionId = hit; break; }
+        }
+        if (matchedActionId) break;
+      }
+    }
+
+    if (!matchedActionId) continue;
+
+    const dedupVoteId = "poll:" + pollCreationId + ":" + voteTs + ":" + matchedActionId;
+    if (staticData.processedIds.includes(dedupVoteId)) continue;
+    staticData.processedIds.push(dedupVoteId);
+    if (staticData.processedIds.length > 500) staticData.processedIds.shift();
+
+    if (staticData.pausedUntil[remoteJid] && Date.now() < staticData.pausedUntil[remoteJid]) {
+      continue;
+    }
+
+    const phoneJid = (upd.remoteJidAlt && upd.remoteJidAlt.includes("@s.whatsapp.net"))
+      ? upd.remoteJidAlt
+      : (upd.key?.remoteJidAlt && upd.key.remoteJidAlt.includes("@s.whatsapp.net"))
+      ? upd.key.remoteJidAlt
+      : remoteJid;
+    const senderPhone = phoneJid.includes("@s.whatsapp.net")
+      ? phoneJid.replace("@s.whatsapp.net", "").replace(/[^0-9]/g, "")
+      : "";
+    const pushName = (upd.pushName || "").trim() || "Client";
+
+    if (staticData.lastActive[remoteJid] && (Date.now() - staticData.lastActive[remoteJid] > 12 * 60 * 60 * 1000)) {
+      delete staticData.conversations[remoteJid];
+    }
+    staticData.lastActive[remoteJid] = Date.now();
+    staticData.conversations[remoteJid] = staticData.conversations[remoteJid] || [];
+    const history = staticData.conversations[remoteJid];
+
+    return [{
+      json: {
+        senderPhone,
+        remoteJid,
+        pushName,
+        userText: mapMenuActionText(matchedActionId),
+        history,
+        isNewConversation: false,
+        isMenuSelection: true,
+        isSystemAlert: false
+      }
+    }];
+  }
+  return [];
+}
+
+// 3. Traitement des messages entrants normaux (messages.upsert)
 if (eventType !== "messages.upsert" && eventType !== "messages_upsert") {
   return [];
 }
@@ -259,13 +496,31 @@ if (msg.protocolMessage || msg.senderKeyDistributionMessage || msg.reactionMessa
   return [];
 }
 
-// Extraire l'identifiant cliqué s'il s'agit d'un menu interactif (liste ou bouton)
-const listRowId = (
+// Extraire l'identifiant cliqué s'il s'agit d'un menu interactif (sondage, liste ou bouton)
+let listRowId = (
   msg.listResponseMessage?.singleSelectReply?.selectedRowId ||
   msg.listResponseMessage?.rowId ||
   msg.buttonsResponseMessage?.selectedButtonId ||
   ""
 ).trim();
+
+if (!listRowId && msg.pollUpdateMessage) {
+  const puList = msg.pollUpdateMessage.pollUpdates || [];
+  for (const pu of puList) {
+    const candidates = [pu?.vote?.name, pu?.optionName, ...(pu?.vote?.selectedOptions || []), ...(pu?.selectedOptions || [])];
+    for (const c of candidates) {
+      const hit = resolvePollOption(c);
+      if (hit) { listRowId = hit; break; }
+    }
+    if (listRowId) break;
+  }
+  if (!listRowId && msg.pollUpdateMessage.vote?.selectedOptions) {
+    for (const c of msg.pollUpdateMessage.vote.selectedOptions) {
+      const hit = resolvePollOption(c);
+      if (hit) { listRowId = hit; break; }
+    }
+  }
+}
 
 // Extraire le texte du message (y compris légendes photo/vidéo/document et position GPS)
 let extractedText =
@@ -279,12 +534,8 @@ let extractedText =
   listRowId ||
   "";
 
-if (listRowId === "menu_app") {
-  extractedText = "[CLIC SUR MENU : Télécharger l'Application Mobile] — Répondez dans la langue utilisée précédemment dans l'historique (ou en Français par défaut) en donnant immédiatement les deux liens directs Google Play (Android) et App Store (iPhone).";
-} else if (listRowId === "menu_site") {
-  extractedText = "[CLIC SUR MENU : Voir le Site Web Officiel] — Répondez dans la langue utilisée précédemment dans l'historique (ou en Français par défaut) en partageant directement le lien officiel https://technozi-ht.com et la Chaîne WhatsApp.";
-} else if (listRowId === "menu_horaires") {
-  extractedText = "[CLIC SUR MENU : Consulter Nos Horaires] — Répondez dans la langue utilisée précédemment dans l'historique (ou en Français par défaut) en donnant nos horaires d'ouverture et si nos bureaux sont actuellement ouverts ou fermés.";
+if (listRowId) {
+  extractedText = mapMenuActionText(listRowId) || extractedText;
 }
 
 if (!extractedText && msg.locationMessage) {
@@ -300,8 +551,17 @@ const fromMe = key.fromMe === true;
 // RÈGLE D'OR CO-PILOTE : GESTION DES MESSAGES VENANT DE NOTRE PROPRE NUMÉRO
 // =========================================================================
 if (fromMe) {
-  // Ignorer les échos d'envoi de menus interactifs par le bot lui-même
-  if (msg.listMessage || msg.buttonsMessage || msg.templateMessage || msg.interactiveMessage) {
+  // Ignorer les échos d'envoi de menus interactifs ou sondages par le bot lui-même
+  if (
+    msg.listMessage ||
+    msg.buttonsMessage ||
+    msg.templateMessage ||
+    msg.interactiveMessage ||
+    msg.pollCreationMessage ||
+    msg.pollCreationMessageV2 ||
+    msg.pollCreationMessageV3 ||
+    msg.pollUpdateMessage
+  ) {
     return [];
   }
 
@@ -392,6 +652,7 @@ if (!userText) {
 staticData.conversations[remoteJid] = staticData.conversations[remoteJid] || [];
 const history = staticData.conversations[remoteJid];
 const isNewConversation = history.length === 0;
+const isMenuSelection = listRowId === "menu_app" || listRowId === "menu_site" || listRowId === "menu_horaires";
 
 return [{
   json: {
@@ -401,6 +662,7 @@ return [{
     userText,
     history,
     isNewConversation,
+    isMenuSelection,
     isSystemAlert: false
   }
 }];`
@@ -478,9 +740,9 @@ return [{
         },
         sendBody: true,
         specifyBody: "json",
-        jsonBody: "={{ JSON.stringify({ number: $json.remoteJid, presence: 'composing', delay: 1500 }) }}",
+        jsonBody: "={{ JSON.stringify({ number: $json.remoteJid, presence: 'composing', delay: 8000 }) }}",
         options: {
-          timeout: 4000
+          timeout: 500
         }
       },
       id: "send-presence-composing",
@@ -676,6 +938,7 @@ const remoteJid = prevData.remoteJid;
 const senderPhone = prevData.senderPhone;
 const userText = prevData.userText;
 const isNewConversation = prevData.isNewConversation === true;
+const isMenuSelection = prevData.isMenuSelection === true;
 
 // Détecter si le client ou l'IA demande explicitement d'afficher le menu cliquable
 const aiAskedMenu = /\\[SHOW_MENU\\]/i.test(aiText || "");
@@ -684,7 +947,7 @@ const userAskedMenu =
   /^(\\/?menu|meni|menú|menu rapide|meni rapid|quick menu|options|opsyon)$/i.test(trimmedUser) ||
   /\\b(voir le menu|afficher le menu|montre[- ]?moi le menu|revoir le menu|remets? le menu|wè meni|ban m meni|afiche meni|montre m meni|show.*menu|see.*menu|open.*menu)\\b/i.test(trimmedUser);
 
-const shouldSendMenu = isNewConversation || aiAskedMenu || userAskedMenu;
+const shouldSendMenu = (isNewConversation && !isMenuSelection) || aiAskedMenu || userAskedMenu;
 
 // Nettoyage léger au cas où Gemini glisserait des balises ou du Markdown non-WhatsApp
 if (aiText) {
@@ -714,7 +977,7 @@ if (!aiText) {
   }
 }
 
-// Préparer le Menu Interactif Cliquable (sendList) et un texte de secours si début de conversation ou demande de menu
+// Préparer le Menu Cliquable Natif par Sondage (sendPoll — Choix A) et un texte de secours
 const detectLang = (text) => {
   const s = (text || "").toLowerCase();
   if (/\\b(bonjou|bonswa|byenvini|kòman|koman|mèsi|dèske|deske|akeyi|bezwen|tanpri|kisa|pou w|ede w|avè w|souple|konbyen|enstalasyon|panno|kamera|solè|sole|meni)\\b/i.test(s)) return "kr";
@@ -724,76 +987,56 @@ const detectLang = (text) => {
 };
 const menuLang = detectLang(aiText) || detectLang(userText) || "fr";
 
-let listPayload = null;
+let pollPayload = null;
 let fallbackMenuText = "";
 
 if (shouldSendMenu) {
   if (menuLang === "kr") {
-    listPayload = {
+    pollPayload = {
       number: remoteJid,
-      title: "Technozi Haïti",
-      description: "Klike sou bouton ki anba a pou w chwazi sa w vle, oswa ekri nou dirèkteman :",
-      buttonText: "📋 Meni Rapid",
-      footerText: "Technozi - Faster & Easier",
-      sections: [{
-        title: "Aksè Rapid",
-        rows: [
-          { title: "📱 Telechaje App la", description: "Aplikasyon Android ak iPhone", rowId: "menu_app" },
-          { title: "🌐 Gade Sit Wèb la", description: "Vizite technozi-ht.com", rowId: "menu_site" },
-          { title: "🕒 Orè Travay Nou", description: "Lè biwo nou yo louvri", rowId: "menu_horaires" }
-        ]
-      }]
+      name: "📌 Meni Rapid Technozi — Klike sou yon opsyon :",
+      selectableCount: 1,
+      values: [
+        "📱 Telechaje App Mobil lan",
+        "🌐 Gade Sit Wèb Ofisyèl la",
+        "🕒 Wè Orè Travay Nou yo"
+      ]
     };
     fallbackMenuText = "📌 *Meni Rapid :*\\n1 - 📱 Telechaje Aplikasyon Mobil lan\\n2 - 🌐 Gade Sit Wèb Ofisyèl la\\n3 - 🕒 Wè Orè Travay Nou yo\\n\\n_Reponn *1*, *2* oswa *3*._";
   } else if (menuLang === "en") {
-    listPayload = {
+    pollPayload = {
       number: remoteJid,
-      title: "Technozi Haïti",
-      description: "Tap the button below to select an option, or write to us directly:",
-      buttonText: "📋 Quick Menu",
-      footerText: "Technozi - Faster & Easier",
-      sections: [{
-        title: "Quick Access",
-        rows: [
-          { title: "📱 Download the App", description: "Android & iPhone mobile app", rowId: "menu_app" },
-          { title: "🌐 Visit Website", description: "Visit technozi-ht.com", rowId: "menu_site" },
-          { title: "🕒 Opening Hours", description: "Business opening hours", rowId: "menu_horaires" }
-        ]
-      }]
+      name: "📌 Technozi Quick Menu — Tap an option:",
+      selectableCount: 1,
+      values: [
+        "📱 Download Mobile App",
+        "🌐 Visit Official Website",
+        "🕒 View Opening Hours"
+      ]
     };
     fallbackMenuText = "📌 *Quick Menu:*\\n1 - 📱 Download our Mobile App\\n2 - 🌐 Visit our Official Website\\n3 - 🕒 View our Opening Hours\\n\\n_Reply *1*, *2* or *3*._";
   } else if (menuLang === "es") {
-    listPayload = {
+    pollPayload = {
       number: remoteJid,
-      title: "Technozi Haïti",
-      description: "Toque el botón de abajo para elegir una opción o escríbanos directamente:",
-      buttonText: "📋 Menú Rápido",
-      footerText: "Technozi - Faster & Easier",
-      sections: [{
-        title: "Acceso Rápido",
-        rows: [
-          { title: "📱 Descargar la App", description: "Aplicación Android y iPhone", rowId: "menu_app" },
-          { title: "🌐 Ver Sitio Web", description: "Visitar technozi-ht.com", rowId: "menu_site" },
-          { title: "🕒 Nuestros Horarios", description: "Horarios de atención", rowId: "menu_horaires" }
-        ]
-      }]
+      name: "📌 Menú Rápido Technozi — Toque una opción:",
+      selectableCount: 1,
+      values: [
+        "📱 Descargar App Móvil",
+        "🌐 Ver Sitio Web Oficial",
+        "🕒 Ver Nuestros Horarios"
+      ]
     };
     fallbackMenuText = "📌 *Menú Rápido:*\\n1 - 📱 Descargar nuestra App Móvil\\n2 - 🌐 Ver el Sitio Web Oficial\\n3 - 🕒 Ver Nuestros Horarios\\n\\n_Responda *1*, *2* o *3*._";
   } else {
-    listPayload = {
+    pollPayload = {
       number: remoteJid,
-      title: "Technozi Haïti",
-      description: "Cliquez sur le bouton ci-dessous pour choisir une option, ou écrivez-nous directement :",
-      buttonText: "📋 Menu Rapide",
-      footerText: "Technozi - Faster & Easier",
-      sections: [{
-        title: "Accès Rapide",
-        rows: [
-          { title: "📱 Télécharger l'App", description: "Application Android & iPhone", rowId: "menu_app" },
-          { title: "🌐 Voir le Site Web", description: "Visiter technozi-ht.com", rowId: "menu_site" },
-          { title: "🕒 Nos Horaires", description: "Heures d'ouverture du bureau", rowId: "menu_horaires" }
-        ]
-      }]
+      name: "📌 Menu Rapide Technozi — Touchez une option :",
+      selectableCount: 1,
+      values: [
+        "📱 Télécharger l'App Mobile",
+        "🌐 Voir le Site Web Officiel",
+        "🕒 Consulter Nos Horaires"
+      ]
     };
     fallbackMenuText = "📌 *Menu Rapide :*\\n1 - 📱 Télécharger l'Application Mobile\\n2 - 🌐 Voir le Site Web Officiel\\n3 - 🕒 Consulter Nos Horaires\\n\\n_Répondez *1*, *2* ou *3*._";
   }
@@ -808,8 +1051,11 @@ staticData.recentBotTexts[remoteJid] = (staticData.recentBotTexts[remoteJid] || 
   item => Date.now() - item.at < 60000
 );
 staticData.recentBotTexts[remoteJid].push({ text: aiText, at: Date.now() });
-if (staticData.recentBotTexts[remoteJid].length > 5) {
-  staticData.recentBotTexts[remoteJid].shift();
+if (shouldSendMenu && fallbackMenuText) {
+  staticData.recentBotTexts[remoteJid].push({ text: fallbackMenuText, at: Date.now() });
+}
+if (staticData.recentBotTexts[remoteJid].length > 8) {
+  staticData.recentBotTexts[remoteJid] = staticData.recentBotTexts[remoteJid].slice(-8);
 }
 
 // Mettre à jour l'historique de conversation (16 messages = 8 allers-retours complets)
@@ -828,7 +1074,7 @@ return [{
     aiText,
     isNewConversation,
     shouldSendMenu,
-    listPayload,
+    pollPayload,
     fallbackMenuText
   }
 }];`
@@ -891,7 +1137,7 @@ return [{
     {
       parameters: {
         method: "POST",
-        url: "http://evolution-api:8080/message/sendList/technozi",
+        url: "http://evolution-api:8080/message/sendPoll/technozi",
         sendHeaders: true,
         headerParameters: {
           parameters: [
@@ -901,7 +1147,7 @@ return [{
         },
         sendBody: true,
         specifyBody: "json",
-        jsonBody: "={{ JSON.stringify($json.listPayload) }}",
+        jsonBody: "={{ JSON.stringify($json.pollPayload) }}",
         options: {
           timeout: 15000
         }
