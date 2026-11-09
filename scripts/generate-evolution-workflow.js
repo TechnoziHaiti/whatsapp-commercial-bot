@@ -361,19 +361,21 @@ if (staticData.lastActive[remoteJid] && (Date.now() - staticData.lastActive[remo
 staticData.lastActive[remoteJid] = Date.now();
 
 let userText = extractedText;
+let isResetCommand = false;
 
 // Commande développeur / test (/reset) pour repartir sur une session vierge
 if (userText && userText.toLowerCase().match(/^(\\/reset|reset bot|reinitialiser)$/)) {
   delete staticData.conversations[remoteJid];
-  userText = "Bonjour ! (La session vient d'être réinitialisée pour test : accueillez-moi chaleureusement et brièvement comme au premier contact.)";
+  isResetCommand = true;
+  userText = "Bonjour";
 }
 
 // Gestion intelligente des messages vocaux audio et médias sans texte
 if (!userText) {
   if (msg.audioMessage) {
-    userText = "[MESSAGE VOCAL AUDIO REÇU] : Le client vient d'envoyer un message vocal audio sur WhatsApp que vous ne pouvez pas encore écouter en direct. Répondez-lui poliment et chaleureusement (dans la langue de l'historique, sinon brièvement en Kreyòl Ayisyen et Français) pour l'inviter à écrire sa demande par texte afin que vous l'aidiez tout de suite, et précisez qu'un conseiller Technozi écoutera aussi son vocal rapidement.";
+    userText = "[MESSAGE VOCAL AUDIO REÇU] : Le client a envoyé un vocal WhatsApp impossible à écouter ici. Invitez-le en 1 phrase courte (dans sa langue, sinon Kreyòl & Français) à écrire sa demande par texte et précisez qu'un conseiller l'écoutera.";
   } else if (msg.imageMessage || msg.videoMessage || msg.documentMessage) {
-    userText = "[FICHIER / PHOTO REÇU SANS TEXTE] : Le client vient d'envoyer une image, vidéo ou document sans texte d'accompagnement. Remerciez-le poliment pour l'envoi et demandez-lui de préciser par écrit sa demande ainsi que son nom et sa ville en Haïti.";
+    userText = "[FICHIER / PHOTO REÇU SANS TEXTE] : Le client a envoyé un média sans texte. Demandez-lui en 1 phrase courte de préciser par écrit son besoin ainsi que son nom et sa ville en Haïti.";
   } else {
     return [];
   }
@@ -383,6 +385,35 @@ staticData.conversations[remoteJid] = staticData.conversations[remoteJid] || [];
 const history = staticData.conversations[remoteJid];
 const isNewConversation = history.length === 0;
 
+// Détecter la langue active (priorité au dernier message avec mots clairs, sinon historique)
+const detectLangCode = (t) => {
+  const s = (t || "").toLowerCase();
+  if (/\\b(bonjou|bonswa|sak pase|kòman|koman|mwen|konbyen|koute|enstalasyon|bezwen|nan|pou|devi|pwofòma|tanpri|mèsi|pa gen|lòt|biwo|meni|opsyon|kamera|panno|oubyen|rezime|wi|kote|epitou)\\b|solè(?![a-zà-ÿ])/i.test(s)) return "kr";
+  if (/\\b(hello|hi|hey|yes|yeah|good morning|good afternoon|good evening|how much|what are|do you|can you|i need|we need|i want|we want|quote|proforma invoice|price|pricing|cost|opening|website|download|please|thanks|thank you|nothing else|that's all|show.*menu|show.*options)\\b/i.test(s)) return "en";
+  if (/\\b(hola|buenos|buenas|cotización|necesito|quiero|cuánto|cuanto|gracias|por favor|horarios|sitio web|descargar|nada más|eso es todo)\\b|menú(?![a-zà-ÿ])/i.test(s)) return "es";
+  if (/\\b(bonjour|bonsoir|salut|oui|non|devis|combien|coûte|coute|installation|besoin|je veux|nous voulons|voudrais|souhaite|merci|rien d'autre|c'est tout|horaires?|télécharger|application|site web|voir|afficher|s'il vous plaît|svp)\\b/i.test(s)) return "fr";
+  return "";
+};
+
+let activeLang = detectLangCode(userText);
+if (!activeLang) {
+  for (let i = history.length - 1; i >= 0; i--) {
+    activeLang = detectLangCode(history[i].text);
+    if (activeLang) break;
+  }
+}
+activeLang = activeLang || "fr";
+
+const trimmedLower = userText.trim().toLowerCase();
+const isSimpleGreeting =
+  isResetCommand ||
+  (isNewConversation && /^(bonjou|bonswa|sak pase|bonjour|bonsoir|salut|hello|hi|hey|hola|buenos d[ií]as|good morning|good afternoon|good evening)[!.,?\\s]*$/i.test(trimmedLower));
+const isMenuCommand =
+  /^(\\/?menu|meni|menú|options?|opsyon|menu rapide|meni rapid|options? rapides?|quick menu|quick options)(?:\\s+(?:svp|s'il vous pla[îi]t|please|pls|tanpri|por favor))?[!.,?\\s]*$/i.test(trimmedLower) ||
+  /\\b(voir le menu|afficher le menu|montre[- ]?moi le menu|revoir le menu|remets? le menu|donne[- ]?moi le menu|voir les options|afficher les options|montre[- ]?moi les options|quelles? sont (?:vos|les) options|wè meni|ban ?m(?:wen)? meni|afiche meni|montre ?m meni|wè opsyon|ban ?m(?:wen)? opsyon|ki opsyon|show.*menu|see.*menu|show.*options|see.*options)\\b/i.test(trimmedLower);
+
+const isInstantMenu = isSimpleGreeting || isMenuCommand;
+
 return [{
   json: {
     senderPhone,
@@ -391,6 +422,8 @@ return [{
     userText,
     history,
     isNewConversation,
+    activeLang,
+    isInstantMenu,
     isSystemAlert: false
   }
 }];`
@@ -453,7 +486,79 @@ return [{
     },
 
     // -------------------------------------------------------------------------
-    // 5. ENVOI DE L'INDICATEUR D'ÉCRITURE ("En train d'écrire...")
+    // 5. ROUTAGE RAPIDE : SALUT SIMPLE / MENU VS CONVERSATION IA
+    // -------------------------------------------------------------------------
+    {
+      parameters: {
+        conditions: {
+          boolean: [
+            {
+              value1: "={{ $json.isInstantMenu }}",
+              value2: true
+            }
+          ]
+        }
+      },
+      id: "check-instant-menu",
+      name: "Salut simple / Menu ?",
+      type: "n8n-nodes-base.if",
+      typeVersion: 1,
+      position: [880, 520]
+    },
+    {
+      parameters: {
+        jsCode: `// Générer le menu 1-5 ultra-direct en 1 seule bulle sans appel IA
+const data = $input.item.json;
+const remoteJid = data.remoteJid;
+const senderPhone = data.senderPhone;
+const userText = data.userText;
+const lang = data.activeLang || "fr";
+
+const menus = {
+  kr: "👋 *Technozi Haïti* — Kòman nou ka ede w ?\\n\\n*1* · 📱 Telechaje Aplikasyon an\\n*2* · 🌐 Sit Wèb Ofisyèl la\\n*3* · 🕒 Orè Travay Nou yo\\n*4* · 📋 Mande yon Devi\\n*5* · 🧾 Mande yon Pwofòma\\n\\n_Reponn *1–5* oswa ekri dirèkteman sa w bezwen an._",
+  en: "👋 *Technozi Haïti* — How can we help you?\\n\\n*1* · 📱 Download the App\\n*2* · 🌐 Official Website\\n*3* · 🕒 Opening Hours\\n*4* · 📋 Request a Quote\\n*5* · 🧾 Request a Proforma\\n\\n_Reply *1–5* or type your request directly._",
+  es: "👋 *Technozi Haïti* — ¿Cómo podemos ayudarle?\\n\\n*1* · 📱 Descargar la App\\n*2* · 🌐 Sitio Web Oficial\\n*3* · 🕒 Nuestros Horarios\\n*4* · 📋 Solicitar Cotización\\n*5* · 🧾 Solicitar Proforma\\n\\n_Responda *1–5* o escriba directamente lo que necesita._",
+  fr: "👋 *Technozi Haïti* — Comment pouvons-nous vous aider ?\\n\\n*1* · 📱 Télécharger l'App\\n*2* · 🌐 Site Web Officiel\\n*3* · 🕒 Nos Horaires\\n*4* · 📋 Demander un Devis\\n*5* · 🧾 Demander une Proforma\\n\\n_Répondez *1–5* ou écrivez directement votre besoin._"
+};
+
+const aiText = menus[lang] || menus.fr;
+
+const staticData = $getWorkflowStaticData('global');
+staticData.conversations = staticData.conversations || {};
+staticData.recentBotTexts = staticData.recentBotTexts || {};
+
+staticData.recentBotTexts[remoteJid] = (staticData.recentBotTexts[remoteJid] || []).filter(
+  item => Date.now() - item.at < 60000
+);
+staticData.recentBotTexts[remoteJid].push({ text: aiText, at: Date.now() });
+if (staticData.recentBotTexts[remoteJid].length > 8) {
+  staticData.recentBotTexts[remoteJid] = staticData.recentBotTexts[remoteJid].slice(-8);
+}
+
+staticData.conversations[remoteJid] = staticData.conversations[remoteJid] || [];
+staticData.conversations[remoteJid].push({ role: "user", text: userText });
+staticData.conversations[remoteJid].push({ role: "model", text: aiText });
+if (staticData.conversations[remoteJid].length > 16) {
+  staticData.conversations[remoteJid] = staticData.conversations[remoteJid].slice(-16);
+}
+
+return [{
+  json: {
+    remoteJid,
+    senderPhone,
+    aiText
+  }
+}];`
+      },
+      id: "instant-menu-node",
+      name: "Menu Rapide Instantané (1 Bulle)",
+      type: "n8n-nodes-base.code",
+      typeVersion: 2,
+      position: [1160, 400]
+    },
+
+    // -------------------------------------------------------------------------
+    // 6. ENVOI DE L'INDICATEUR D'ÉCRITURE ("En train d'écrire...")
     // -------------------------------------------------------------------------
     {
       parameters: {
@@ -477,12 +582,12 @@ return [{
       name: "Afficher 'En train d'écrire...'",
       type: "n8n-nodes-base.httpRequest",
       typeVersion: 4.2,
-      position: [940, 440],
+      position: [1160, 560],
       continueOnFail: true
     },
 
     // -------------------------------------------------------------------------
-    // 6. CERVEAU IA GOOGLE GEMINI 3.5 FLASH-LITE (RAPIDE & HAUT QUOTA GRATUIT)
+    // 7. CERVEAU IA GOOGLE GEMINI 3.5 FLASH-LITE (MODE ULTRA-DIRECT)
     // -------------------------------------------------------------------------
     {
       parameters: {
@@ -503,7 +608,9 @@ return [{
             const phone = $json.senderPhone;
             const phoneDisplay = phone ? ("+" + phone) : "Non visible";
             const history = $json.history || [];
-            const isNewConversation = $json.isNewConversation === true || history.length === 0;
+            const activeLangCode = $json.activeLang || "fr";
+            const langNames = { kr: "Kreyòl Ayisyen", en: "English", es: "Español", fr: "Français" };
+            const activeLangLabel = langNames[activeLangCode] || "Français";
 
             let haitiTimeInfo = "";
             try {
@@ -515,108 +622,79 @@ return [{
               haitiTimeInfo = "Haïti";
             }
 
-            const firstTurnInstruction = isNewConversation
-              ? "STATUT DE LA DISCUSSION : PREMIER MESSAGE (DÉBUT DE CONVERSATION).\\nUn bloc texte d'options rapides numérotées (1 - Télécharger l'App, 2 - Voir le Site Web, 3 - Nos Horaires) va être envoyé juste en dessous de votre message. Rédigez donc un accueil court, chaleureux et naturel (ou répondez directement à sa question s'il en pose déjà une), SANS écrire vous-même de liste numérotée 1/2/3."
-              : "STATUT DE LA DISCUSSION : CONVERSATION EN COURS.";
+            const systemPrompt = \`Vous êtes Pitonbot, l'assistant WhatsApp de Technozi Haïti ("Faster & Easier").
 
-            const systemPrompt = \`Vous êtes Pitonbot, l'assistant virtuel intelligent de Technozi Haïti ("Faster & Easier") sur WhatsApp.
-Votre mission est d'accueillir chaque client avec chaleur, respect et intelligence, de répondre avec exactitude à ses questions sur Technozi, et de qualifier proprement sa demande pour notre équipe.
+1. LANGUE OBLIGATOIRE (ZÉRO MÉLANGE)
+Répondez EXCLUSIVEMENT dans la langue indiquée par [LANGUE ACTIVE] (ou dans la nouvelle langue si le client vient d'en changer avec ses propres mots), sans JAMAIS mélanger des mots d'une autre langue :
+• En Français : utilisez "devis", "proforma" (jamais de mot créole).
+• En Kreyòl Ayisyen : créole haïtien simple et naturel ("Bonjou", "Bonswa", "kit Starlink", "zòn enstalasyon an", "kamera", "panno solè", "devi", "pwofòma"). Évitez les calques compliqués.
+• En English : natural concise English ("Quote", "Proforma Invoice").
+• En Español : español claro y directo ("Cotización", "Factura Proforma").
 
-1. LANGUE PERÇUE & ADAPTATION AUTOMATIQUE (ZÉRO MENU)
-• Aucun menu de sélection de langue n'existe : détectez automatiquement la langue perçue dans le message du client (Kreyòl Ayisyen, Français, English, ou Español) et répondez NATURELLEMENT dans cette même langue.
-• Si le client écrit dans une autre langue en plein milieu de la discussion (ex: commence en français puis écrit en créole ou en anglais), suivez-le immédiatement et naturellement dans sa nouvelle langue.
-• Si le client mélange Kreyòl et Français, répondez dans la langue dominante avec beaucoup d'aisance.
-• Qualité linguistique :
-  - Kreyòl Ayisyen : créole haïtien authentique, poli, fluide et naturel en Haïti (utilisez "Bonjou" ou "Bonswa" selon l'heure locale ci-dessous, "Mèsi dèske w kontakte Technozi", "Kòman nou ka ede w ?", etc.).
-  - Français : français soigné, chaleureux, clair et irréprochable.
-  - English : natural, courteous, and professional English.
+2. STYLE — ULTRA-DIRECT, SEC ET TRANCHANT
+• 1 à 2 phrases courtes maximum par réponse (sauf liens, horaires ou récapitulatif final).
+• INTERDIT : formules de politesse longues ("C'est un plaisir...", "Merci de nous avoir contactés", "N'hésitez surtout pas..."). Allez droit au but.
+• Ne redemandez JAMAIS une information déjà donnée dans la discussion, ni le numéro de téléphone (vous l'avez déjà : \${phoneDisplay}).
+• Format WhatsApp : *gras* avec UNE SEULE étoile (jamais **double étoile**, jamais ###). 0 à 1 émoji max par message.
 
-2. RÈGLE ABSOLUE : AUCUN PRIX NI ESTIMATION FINANCIÈRE
-• Ne donnez JAMAIS de prix, ni de fourchette tarifaire, ni de montant estimatif en dollars ou en gourdes.
-• Si le client demande un prix, expliquez avec tact que Technozi prépare des devis sur-mesure selon les caractéristiques exactes de chaque besoin et la zone d'intervention en Haïti, puis proposez de recueillir quelques détails pour lui établir une proposition précise.
+3. RÈGLE ABSOLUE : ZÉRO PRIX NI ESTIMATION
+• Ne donnez JAMAIS de prix, fourchette ou montant estimatif.
+• Si le client demande un prix : répondez en 1 phrase que les tarifs varient selon le besoin exact et la zone en Haïti, puis demandez uniquement l'information manquante.
 
-3. BASE DE CONNAISSANCES OFFICIELLE TECHNOZI HAÏTI (NE RIEN INVENTER)
-Technozi est une entreprise technologique multi-services. Starlink n'est qu'un produit parmi d'autres. Voici nos 6 domaines d'expertise (tous à égalité) :
-• Énergie Solaire & Secours Hybride : panneaux solaires, onduleurs hybrides, batteries lithium pour maisons, bureaux et commerces.
-• Internet Satellitaire & Starlink : kits officiels, installation soignée sur mât/toiture, orientation et distribution Wi-Fi.
-• Vidéosurveillance & Sécurité (CCTV) : caméras IP HD, vision nocturne, enregistreurs NVR, accès à distance sur smartphone 24/7.
-• Réseaux Informatiques & Wi-Fi Pro : câblage structuré certifié, baies de brassage, routeurs/switchs, couverture Wi-Fi multi-zones.
-• Matériel & Équipements Informatiques : laptops professionnels (HP, Dell...), ordinateurs fixes, serveurs, écrans, imprimantes, routeurs, SSD et accessoires.
-• Support & Maintenance Informatique : diagnostic, réparation, infogérance et assistance technique.
-
-Coordonnées officielles vérifiées :
+4. BASE OFFICIELLE TECHNOZI HAÏTI (6 SERVICES À ÉGALITÉ)
+Services : Énergie Solaire & Secours Hybride (panneaux, onduleurs, batteries lithium), Internet Starlink & installation, Vidéosurveillance CCTV/IP, Réseaux & Wi-Fi Pro, Matériel IT (laptops HP/Dell, PC, serveurs, imprimantes, routeurs, SSD), Support & Maintenance IT.
 • Site Web : https://technozi-ht.com
-• Téléphone / WhatsApp commercial : +509 37 03 0009
-• E-mail : sales@technozi-ht.com
-• Horaires : Lundi au Vendredi de 8h00 à 17h00 | Samedi de 8h00 à 15h00 | Dimanche fermé.
-• Application Mobile officielle :
-  - Android (Google Play) : https://play.google.com/store/apps/details?id=com.wiserpos.technozi&hl=en_SG
-  - iPhone / iOS (App Store) : https://apps.apple.com/us/app/technozi-haiti/id6756228637?l=es-MX
+• Tél / WhatsApp : +509 37 03 0009 | Email : sales@technozi-ht.com
+• Horaires : Lun–Ven 8h00–17h00 | Samedi 8h00–15h00 | Dimanche fermé.
+• App Android : https://play.google.com/store/apps/details?id=com.wiserpos.technozi&hl=en_SG
+• App iOS (iPhone) : https://apps.apple.com/us/app/technozi-haiti/id6756228637?l=es-MX
 • Chaîne WhatsApp : https://whatsapp.com/channel/0029Vb7XDp3EVccQG29idN2d
+Interdiction d'inventer des prix, stocks en temps réel ou adresse de rue.
 
-Interdiction d'hallucination : N'inventez jamais de prix, ni de disponibilité de stock en temps réel, ni d'adresse physique de rue non mentionnée ci-dessus, ni de délais fermes sans validation de l'équipe.
+5. OPTIONS 1–5 (DEVIS ET PROFORMA SÉPARÉS)
+• Option *1* (ou demande sur l'app) : donnez directement les 2 liens (Android + iOS) sans paragraphe autour.
+• Option *2* (ou demande sur le site) : donnez directement https://technozi-ht.com + Chaîne WhatsApp.
+• Option *3* (ou horaires) : donnez les horaires exacts + précisez si nos bureaux sont actuellement ouverts ou fermés selon l'heure locale d'Haïti ci-dessous.
+• Option *4* (*Devis* — projet, installation ou estimation) : demandez uniquement ce qui manque parmi Nom/Entreprise, Ville/Zone en Haïti, et besoin technique/détails.
+• Option *5* (*Proforma* — facture proforma officielle d'achat) : demandez uniquement ce qui manque parmi Nom/Entreprise à facturer, Ville/Zone, articles/modèles & quantités exactes, plus e-mail facultatif pour envoi PDF (sinon WhatsApp).
+• Si vous venez juste de demander une quantité (ex: "Combien de caméras ?") et que le client répond "4" ou "5", c'est une quantité et non l'option du menu !
+• Si le client demande à revoir le menu / les options : 1 courte phrase + [SHOW_OPTIONS].
 
-4. INTELLIGENCE CONVERSATIONNELLE, OPTIONS RAPIDES & QUALIFICATION NATURELLE
-• \${firstTurnInstruction}
-• Réponses exactes aux options rapides (par numéro OU par question libre à tout moment) :
-  - Si le client répond "1", "option 1", "numéro 1", ou demande votre application par phrase libre ("où télécharger l'app ?", "ban m lyen app lan", "Android ou iPhone ?") : donnez immédiatement les deux liens officiels bien présentés :
-    • Android (Google Play) : https://play.google.com/store/apps/details?id=com.wiserpos.technozi&hl=en_SG
-    • iPhone / iOS (App Store) : https://apps.apple.com/us/app/technozi-haiti/id6756228637?l=es-MX
-  - Si le client répond "2", "option 2", "numéro 2", ou demande votre site par phrase libre ("votre site web ?", "ki sit wèb nou ?") : partagez directement https://technozi-ht.com (+ la Chaîne WhatsApp https://whatsapp.com/channel/0029Vb7XDp3EVccQG29idN2d).
-  - Si le client répond "3", "option 3", "numéro 3", ou demande vos heures d'ouverture ("à quelle heure ouvrez-vous ?", "ki lè nou fèmen ?", "êtes-vous ouverts ?") : donnez nos horaires exacts (Lun–Ven : 8h00 – 17h00, Samedi : 8h00 – 15h00, Dimanche : Fermé) et précisez gentiment si nos bureaux sont actuellement ouverts ou fermés selon l'heure locale d'Haïti !
-  - Si le client demande à VOIR LES OPTIONS / le menu lui-même à n'importe quel moment ("menu", "meni", "options", "voir les options", "montre-moi le menu", "mwen vle wè meni an", "ki opsyon nou genyen ?", "show options", "show me the menu") : répondez brièvement et poliment que voici les options ci-dessous (SANS réécrire la liste 1/2/3 vous-même), et ajoutez obligatoirement le marqueur invisible [SHOW_OPTIONS] à la toute fin de votre réponse pour réafficher le bloc d'options numérotées.
-  - Attention au contexte : si vous venez juste de demander une quantité (ex: "Combien de caméras ?") et que le client écrit "2", c'est bien sûr une quantité et non l'option 2 !
-• Premier contact simple ("Bonjou", "Bonjour", "Hello") : accueillez chaleureusement au nom de Technozi Haïti et demandez brièvement comment nous pouvons l'aider aujourd'hui (évitez les longs pavés).
-• Répondez directement à la question posée avant d'en poser une autre.
-• Ne redemandez JAMAIS une information que le client a déjà mentionnée dans la discussion.
-• Pour une demande de produit, installation ou devis, recueillez naturellement (1 à 2 questions courtes maximum par message, jamais d'interrogatoire) :
-  1. Son Nom complet (ou le nom de son entreprise / organisation).
-  2. Sa Ville ou Zone en Haïti (ex: Pétion-Ville, Delmas, Tabarre, Cap-Haïtien...).
-  3. Le service/équipement précis et les précisions utiles selon le cas (ex: nombre de caméras, type de bâtiment, usages électriques pour le solaire, modèle/quantité de matériel, etc.).
+6. RÈGLE IMPÉRATIVE DE CLÔTURE — TOUJOURS FINIR AVEC UN RÉCAPITULATIF COMPLET DE TOUT
+• Dès que vous avez les infos essentielles (Nom/Entreprise + Ville/Zone + Besoin) ET que le client indique qu'il n'a rien à ajouter ("c'est tout", "rien d'autre", "oui", "merci", "pa gen lòt detay", "se sa", "non mèsi", "that's all") : **NE REPOSEZ PLUS AUCUNE QUESTION DE CONFIRMATION**. Générez IMMÉDIATEMENT le Récapitulatif complet de tout ce qui a été convenu.
+• À la fin de toute demande commerciale (devis, proforma, commande, installation ou support), terminez TOUJOURS par le Récapitulatif complet structuré, sans oublier aucun détail mentionné (entreprise, téléphone, e-mail si donné, ville, type de demande, articles/quantités, précisions), 100 % dans la langue du client :
 
-5. CLÔTURE & FICHE RÉCAPITULATIVE (POUR DEVIS / COMMANDES)
-• Une fois les éléments clés réunis, demandez-lui gentiment dans sa langue s'il a d'autres précisions ou questions à ajouter, ou s'il a terminé.
-• Dès qu'il confirme qu'il a terminé (ou valide clairement la fin), affichez la Fiche Récapitulative structurée dans sa langue, prête à être relue et transmise à l'équipe :
+Libellés selon langue :
+- Français Devis : 📋 *Récapitulatif complet de votre demande* (Client / Entreprise, Téléphone, Ville / Zone, Type, Besoin & Précisions)
+- Français Proforma : 🧾 *Récapitulatif complet — Demande de Proforma* (Client / Entreprise, Téléphone, Email, Ville / Zone, Articles & Quantités, Précisions)
+- Kreyòl Devi : 📋 *Rezime konplè demann ou an* (Kliyan / Antrepriz, Telefòn, Vil / Zòn, Kalite, Bezwen & Presizyon)
+- Kreyòl Pwofòma : 🧾 *Rezime konplè — Demann Pwofòma* (Kliyan / Antrepriz, Telefòn, Imèl, Vil / Zòn, Atik & Kantite, Presizyon)
+- English Quote : 📋 *Complete Request Summary* (Client / Company, Phone, City / Area, Type, Request & Details)
+- English Proforma : 🧾 *Proforma Request Summary* (Client / Company, Phone, Email, City / Area, Items & Quantities, Notes)
 
-📋 *Récapitulatif de votre demande* (adaptez les libellés en Kreyòl ou English si le client parle Kreyòl ou English) :
-• *Client* : [Nom / Entreprise]
-• *Téléphone* : \${phoneDisplay}
-• *Ville / Zone* : [Ville ou quartier indiqué]
-• *Service / Demande* : [Besoin exprimé]
-• *Précisions* : [Détails techniques utiles ou "Aucune"]
-
-Ajoutez une courte phrase chaleureuse confirmant que l'équipe Technozi prend le relais rapidement.
-
-6. FORMATAGE WHATSAPP, SOBRIÉTÉ & PHRASES TOUJOURS COMPLÈTES
-• Format WhatsApp natif : utilisez *gras* avec UNE SEULE étoile (n'utilisez JAMAIS **double étoile** ni ### titres Markdown).
-• Restez sobre : 0 à 2 émojis discrets maximum par message, style humain, poli et fluide.
-• Concision : maximum 2 à 3 paragraphes courts bien aérés.
-• Terminez TOUJOURS complètement vos phrases et vos listes. Ne coupez jamais une phrase au milieu.
+Ajoutez juste en dessous 1 phrase courte confirmant que l'équipe Technozi prend le relais rapidement.
 
 Contexte actuel :
-• Date / Heure locale : \${haitiTimeInfo}
+• Date / Heure locale Haïti : \${haitiTimeInfo}
 • Nom WhatsApp affiché : \${clientName}
-• Numéro client : \${phoneDisplay}\`;
+• Numéro WhatsApp client : \${phoneDisplay}\`;
 
             const contents = [
               { role: "user", parts: [{ text: systemPrompt }] },
-              { role: "model", parts: [{ text: "Bien reçu. Je détecterai automatiquement la langue du client (Kreyòl, Français, English ou autre), je répondrai avec intelligence et sobriété au nom de Technozi Haïti sans jamais donner de prix, et je terminerai toujours toutes mes phrases." }] }
+              { role: "model", parts: [{ text: "Compris. Réponses ultra-directes en 1–2 phrases max dans la langue exacte du client, options 4 (Devis) et 5 (Proforma) distinctes, et récapitulatif final complet systématique." }] }
             ];
 
             for (const h of history.slice(-16)) {
               contents.push({ role: h.role, parts: [{ text: h.text }] });
             }
 
-            contents.push({ role: "user", parts: [{ text: userText }] });
+            contents.push({ role: "user", parts: [{ text: "[LANGUE ACTIVE OBLIGATOIRE : " + activeLangLabel + "]\\n" + userText }] });
 
             return {
               contents: contents,
               generationConfig: {
-                temperature: 0.4,
-                maxOutputTokens: 2048,
-                thinkingConfig: {
-                  thinkingLevel: "low"
-                }
+                temperature: 0.25,
+                maxOutputTokens: 1024
               }
             };
           })()
@@ -632,15 +710,15 @@ Contexte actuel :
       name: "2. Cerveau IA Gemini (Gratuit)",
       type: "n8n-nodes-base.httpRequest",
       typeVersion: 4.2,
-      position: [940, 620]
+      position: [1400, 720]
     },
 
     // -------------------------------------------------------------------------
-    // 7. EXTRAIRE LA RÉPONSE DE L'IA & SAUVEGARDER L'HISTORIQUE
+    // 8. EXTRAIRE LA RÉPONSE DE L'IA & SAUVEGARDER L'HISTORIQUE (1 SEULE BULLE)
     // -------------------------------------------------------------------------
     {
       parameters: {
-        jsCode: `// Parser proprement la réponse de Gemini et gérer les garde-fous WhatsApp
+        jsCode: `// Parser la réponse de Gemini et préparer l'envoi WhatsApp en 1 seule bulle propre
 const geminiRes = $input.item.json;
 const candidate = geminiRes.candidates?.[0];
 const parts = candidate?.content?.parts || [];
@@ -668,18 +746,11 @@ if (!prevData) {
 const remoteJid = prevData.remoteJid;
 const senderPhone = prevData.senderPhone;
 const userText = prevData.userText;
-const isNewConversation = prevData.isNewConversation === true;
+const activeLang = prevData.activeLang || "fr";
 
-// Détecter si le client ou l'IA demande d'afficher les options rapides numérotées
 const aiAskedOptions = /\\[(SHOW_OPTIONS|SHOW_MENU)\\]/i.test(aiText || "");
-const trimmedUser = (userText || "").trim();
-const userAskedOptions =
-  /^(\\/?menu|meni|menú|options?|opsyon|menu rapide|meni rapid|options? rapides?|quick menu|quick options)$/i.test(trimmedUser) ||
-  /\\b(voir le menu|afficher le menu|montre[- ]?moi le menu|revoir le menu|remets? le menu|voir les options|afficher les options|montre[- ]?moi les options|quelles? sont (?:vos|les) options|wè meni|ban m meni|afiche meni|montre m meni|wè opsyon|ban m opsyon|ki opsyon|show.*menu|see.*menu|show.*options|see.*options)\\b/i.test(trimmedUser);
 
-const shouldSendOptions = isNewConversation || aiAskedOptions || userAskedOptions;
-
-// Nettoyage léger au cas où Gemini glisserait des balises ou du Markdown non-WhatsApp
+// Nettoyage Markdown non-WhatsApp
 if (aiText) {
   aiText = aiText
     .replace(/\\[(SHOW_OPTIONS|SHOW_MENU)\\]/gi, "")
@@ -689,45 +760,33 @@ if (aiText) {
     .trim();
 }
 
-// Secours multilingue si la réponse IA était vide
-if (!aiText) {
-  const lower = (userText || "").toLowerCase();
-  if (/\\b(mwen|kreyol|kreyòl|bonjou|bonswa|konbyen|enstalasyon|oubyen|tanpri|bezwen|meni|opsyon)\\b/i.test(lower)) {
-    aiText = shouldSendOptions && !isNewConversation
-      ? "Men opsyon rapid Technozi Haïti yo anba a :"
-      : "Mèsi dèske w kontakte *Technozi Haïti*. Nou kontan akeyi w jodi a.";
-  } else if (/\\b(hello|hi|how|much|price|need|please|want|solar|can|english|what|where|menu|options)\\b/i.test(lower)) {
-    aiText = shouldSendOptions && !isNewConversation
-      ? "Here are the Technozi Haïti quick options below:"
-      : "Thank you for contacting *Technozi Haïti*. Welcome! How can we assist you today?";
-  } else {
-    aiText = shouldSendOptions && !isNewConversation
-      ? "Voici les options disponibles pour *Technozi Haïti* ci-dessous :"
-      : "Merci d'avoir contacté *Technozi Haïti*. Bienvenue ! Comment pouvons-nous vous aider aujourd'hui ?";
-  }
+const optionBlocks = {
+  kr: "*1* · 📱 Telechaje Aplikasyon an\\n*2* · 🌐 Sit Wèb Ofisyèl la\\n*3* · 🕒 Orè Travay Nou yo\\n*4* · 📋 Mande yon Devi\\n*5* · 🧾 Mande yon Pwofòma\\n\\n_Reponn *1–5* oswa ekri dirèkteman sa w bezwen an._",
+  en: "*1* · 📱 Download the App\\n*2* · 🌐 Official Website\\n*3* · 🕒 Opening Hours\\n*4* · 📋 Request a Quote\\n*5* · 🧾 Request a Proforma\\n\\n_Reply *1–5* or type your request directly._",
+  es: "*1* · 📱 Descargar la App\\n*2* · 🌐 Sitio Web Oficial\\n*3* · 🕒 Nuestros Horarios\\n*4* · 📋 Solicitar Cotización\\n*5* · 🧾 Solicitar Proforma\\n\\n_Responda *1–5* o escriba directamente lo que necesita._",
+  fr: "*1* · 📱 Télécharger l'App\\n*2* · 🌐 Site Web Officiel\\n*3* · 🕒 Nos Horaires\\n*4* · 📋 Demander un Devis\\n*5* · 🧾 Demander une Proforma\\n\\n_Répondez *1–5* ou écrivez directement votre besoin._"
+};
+
+if (aiAskedOptions) {
+  const intro = aiText || (
+    activeLang === "kr" ? "👋 *Technozi Haïti* — Men opsyon yo :" :
+    activeLang === "en" ? "👋 *Technozi Haïti* — Quick options:" :
+    activeLang === "es" ? "👋 *Technozi Haïti* — Opciones rápidas:" :
+    "👋 *Technozi Haïti* — Comment pouvons-nous vous aider ?"
+  );
+  aiText = intro + "\\n\\n" + (optionBlocks[activeLang] || optionBlocks.fr);
 }
 
-// Préparer les Options Rapides en texte structuré (la personne répond 1, 2, 3 ou écrit ce qu'elle veut faire)
-const detectLang = (text) => {
-  const s = (text || "").toLowerCase();
-  if (/\\b(bonjou|bonswa|byenvini|kòman|koman|mèsi|dèske|deske|akeyi|bezwen|tanpri|kisa|pou w|ede w|avè w|souple|konbyen|enstalasyon|panno|kamera|solè|sole|meni|opsyon)\\b/i.test(s)) return "kr";
-  if (/\\b(hello|welcome|how can i|how may i|assist you|help you|thank you|good morning|good afternoon|good evening|please|need|want|below)\\b/i.test(s)) return "en";
-  if (/\\b(hola|bienvenido|buenos días|buenas tardes|cómo puedo|en qué puedo|gracias por|ayudarle|menú|opciones)\\b/i.test(s)) return "es";
-  return "";
-};
-const optionsLang = detectLang(aiText) || detectLang(userText) || "fr";
-
-let optionsText = "";
-
-if (shouldSendOptions) {
-  if (optionsLang === "kr") {
-    optionsText = "📌 *Opsyon Rapid :*\\n1 - 📱 Telechaje Aplikasyon Mobil lan\\n2 - 🌐 Gade Sit Wèb Ofisyèl la\\n3 - 🕒 Wè Orè Travay Nou yo\\n\\n_Reponn *1*, *2*, *3* oswa di m dirèkteman sa w bezwen fè._";
-  } else if (optionsLang === "en") {
-    optionsText = "📌 *Quick Options:*\\n1 - 📱 Download our Mobile App\\n2 - 🌐 Visit our Official Website\\n3 - 🕒 View our Opening Hours\\n\\n_Reply *1*, *2*, *3* or tell me directly what you would like to do._";
-  } else if (optionsLang === "es") {
-    optionsText = "📌 *Opciones Rápidas:*\\n1 - 📱 Descargar nuestra App Móvil\\n2 - 🌐 Ver el Sitio Web Oficial\\n3 - 🕒 Ver Nuestros Horarios\\n\\n_Responda *1*, *2*, *3* o dígame directamente qué desea hacer._";
+// Secours multilingue si la réponse IA était vide
+if (!aiText) {
+  if (activeLang === "kr") {
+    aiText = "Tanpri presize demann ou a (non w, vil ou, ak ekipman w bezwen an) pou ekip Technozi a ka ede w rapidman.";
+  } else if (activeLang === "en") {
+    aiText = "Please share your request details (name, city in Haiti, and what you need) so Technozi can assist you right away.";
+  } else if (activeLang === "es") {
+    aiText = "Por favor indique su nombre, ciudad en Haití y lo que necesita para atenderle de inmediato.";
   } else {
-    optionsText = "📌 *Options Rapides :*\\n1 - 📱 Télécharger l'Application Mobile\\n2 - 🌐 Voir le Site Web Officiel\\n3 - 🕒 Consulter Nos Horaires\\n\\n_Répondez *1*, *2*, *3* ou dites-moi directement ce que vous souhaitez faire._";
+    aiText = "Précisez votre besoin (nom, ville en Haïti et demande) pour que l'équipe Technozi vous réponde rapidement.";
   }
 }
 
@@ -735,23 +794,19 @@ const staticData = $getWorkflowStaticData('global');
 staticData.conversations = staticData.conversations || {};
 staticData.recentBotTexts = staticData.recentBotTexts || {};
 
-// Enregistrer ces messages pour ne pas confondre l'écho du bot avec une réponse humaine (fromMe)
+// Enregistrer ce message pour ne pas confondre l'écho du bot avec une réponse humaine (fromMe)
 staticData.recentBotTexts[remoteJid] = (staticData.recentBotTexts[remoteJid] || []).filter(
   item => Date.now() - item.at < 60000
 );
 staticData.recentBotTexts[remoteJid].push({ text: aiText, at: Date.now() });
-if (shouldSendOptions && optionsText) {
-  staticData.recentBotTexts[remoteJid].push({ text: optionsText.trim(), at: Date.now() });
-}
 if (staticData.recentBotTexts[remoteJid].length > 8) {
   staticData.recentBotTexts[remoteJid] = staticData.recentBotTexts[remoteJid].slice(-8);
 }
 
 // Mettre à jour l'historique de conversation (16 messages = 8 allers-retours complets)
-const storedModelReply = (shouldSendOptions && optionsText) ? (aiText + "\\n\\n" + optionsText) : aiText;
 staticData.conversations[remoteJid] = staticData.conversations[remoteJid] || [];
 staticData.conversations[remoteJid].push({ role: "user", text: userText });
-staticData.conversations[remoteJid].push({ role: "model", text: storedModelReply });
+staticData.conversations[remoteJid].push({ role: "model", text: aiText });
 
 if (staticData.conversations[remoteJid].length > 16) {
   staticData.conversations[remoteJid] = staticData.conversations[remoteJid].slice(-16);
@@ -761,10 +816,7 @@ return [{
   json: {
     remoteJid,
     senderPhone,
-    aiText,
-    isNewConversation,
-    shouldSendOptions,
-    optionsText
+    aiText
   }
 }];`
       },
@@ -772,11 +824,11 @@ return [{
       name: "3. Parser Réponse IA",
       type: "n8n-nodes-base.code",
       typeVersion: 2,
-      position: [1200, 620]
+      position: [1640, 720]
     },
 
     // -------------------------------------------------------------------------
-    // 8. ENVOYER LA RÉPONSE WHATSAPP (Via Evolution API)
+    // 9. ENVOYER LA RÉPONSE WHATSAPP UNIQUE (Via Evolution API)
     // -------------------------------------------------------------------------
     {
       parameters: {
@@ -800,53 +852,7 @@ return [{
       name: "4. Envoyer Réponse WhatsApp",
       type: "n8n-nodes-base.httpRequest",
       typeVersion: 4.2,
-      position: [1440, 520]
-    },
-
-    // -------------------------------------------------------------------------
-    // 9. OPTIONS RAPIDES NUMÉROTÉES (DÉBUT DE CONVERSATION OU DEMANDE D'OPTIONS)
-    // -------------------------------------------------------------------------
-    {
-      parameters: {
-        conditions: {
-          boolean: [
-            {
-              value1: "={{ $json.shouldSendOptions }}",
-              value2: true
-            }
-          ]
-        }
-      },
-      id: "check-new-conversation",
-      name: "Doit afficher les options ?",
-      type: "n8n-nodes-base.if",
-      typeVersion: 1,
-      position: [1440, 740]
-    },
-    {
-      parameters: {
-        method: "POST",
-        url: "http://evolution-api:8080/message/sendText/technozi",
-        sendHeaders: true,
-        headerParameters: {
-          parameters: [
-            { name: "apikey", value: EVOLUTION_API_KEY },
-            { name: "Content-Type", value: "application/json" }
-          ]
-        },
-        sendBody: true,
-        specifyBody: "json",
-        jsonBody: "={{ JSON.stringify({ number: $json.remoteJid, text: $json.optionsText }) }}",
-        options: {
-          timeout: 15000
-        }
-      },
-      id: "send-quick-options",
-      name: "5. Envoyer Options Rapides (Texte)",
-      type: "n8n-nodes-base.httpRequest",
-      typeVersion: 4.2,
-      position: [1680, 740],
-      continueOnFail: true
+      position: [1900, 560]
     }
   ],
   connections: {
@@ -865,26 +871,26 @@ return [{
     "Est-ce une alerte technique ?": {
       main: [
         [{ node: "Alerte Développeur (Email)", type: "main", index: 0 }],
+        [{ node: "Salut simple / Menu ?", type: "main", index: 0 }]
+      ]
+    },
+    "Salut simple / Menu ?": {
+      main: [
+        [{ node: "Menu Rapide Instantané (1 Bulle)", type: "main", index: 0 }],
         [
           { node: "Afficher 'En train d'écrire...'", type: "main", index: 0 },
           { node: "2. Cerveau IA Gemini (Gratuit)", type: "main", index: 0 }
         ]
       ]
     },
+    "Menu Rapide Instantané (1 Bulle)": {
+      main: [[{ node: "4. Envoyer Réponse WhatsApp", type: "main", index: 0 }]]
+    },
     "2. Cerveau IA Gemini (Gratuit)": {
       main: [[{ node: "3. Parser Réponse IA", type: "main", index: 0 }]]
     },
     "3. Parser Réponse IA": {
-      main: [[
-        { node: "4. Envoyer Réponse WhatsApp", type: "main", index: 0 },
-        { node: "Doit afficher les options ?", type: "main", index: 0 }
-      ]]
-    },
-    "Doit afficher les options ?": {
-      main: [
-        [{ node: "5. Envoyer Options Rapides (Texte)", type: "main", index: 0 }],
-        []
-      ]
+      main: [[{ node: "4. Envoyer Réponse WhatsApp", type: "main", index: 0 }]]
     }
   },
   settings: {
