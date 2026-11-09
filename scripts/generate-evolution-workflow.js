@@ -613,17 +613,20 @@ Contexte actuel :
               contents: contents,
               generationConfig: {
                 temperature: 0.4,
-                maxOutputTokens: 2048
+                maxOutputTokens: 2048,
+                thinkingConfig: {
+                  thinkingLevel: "low"
+                }
               }
             };
           })()
         }}`,
         options: {
-          timeout: 20000
+          timeout: 60000
         }
       },
       retryOnFail: true,
-      maxTries: 2,
+      maxTries: 3,
       waitBetweenTries: 1500,
       id: "call-gemini",
       name: "2. Cerveau IA Gemini (Gratuit)",
