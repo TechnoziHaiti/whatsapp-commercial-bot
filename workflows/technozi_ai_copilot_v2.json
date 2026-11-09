@@ -181,7 +181,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=VOTRE_CLE_GEMINI_ICI",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=VOTRE_CLE_GEMINI_ICI",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -199,7 +199,7 @@
         }
       },
       "retryOnFail": true,
-      "maxTries": 3,
+      "maxTries": 2,
       "waitBetweenTries": 1500,
       "id": "call-gemini",
       "name": "2. Cerveau IA Gemini (Gratuit)",

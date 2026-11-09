@@ -482,12 +482,12 @@ return [{
     },
 
     // -------------------------------------------------------------------------
-    // 6. CERVEAU IA GOOGLE GEMINI 3.5 FLASH (DÉTECTION LANGUE PERÇUE & PRO)
+    // 6. CERVEAU IA GOOGLE GEMINI 3.5 FLASH-LITE (RAPIDE & HAUT QUOTA GRATUIT)
     // -------------------------------------------------------------------------
     {
       parameters: {
         method: "POST",
-        url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+        url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`,
         sendHeaders: true,
         headerParameters: {
           parameters: [
@@ -626,7 +626,7 @@ Contexte actuel :
         }
       },
       retryOnFail: true,
-      maxTries: 3,
+      maxTries: 2,
       waitBetweenTries: 1500,
       id: "call-gemini",
       name: "2. Cerveau IA Gemini (Gratuit)",
