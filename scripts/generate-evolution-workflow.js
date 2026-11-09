@@ -468,9 +468,9 @@ return [{
         },
         sendBody: true,
         specifyBody: "json",
-        jsonBody: "={{ JSON.stringify({ number: $json.remoteJid, presence: 'composing', delay: 8000 }) }}",
+        jsonBody: "={{ JSON.stringify({ number: $json.remoteJid, presence: 'composing', delay: 20000 }) }}",
         options: {
-          timeout: 500
+          timeout: 800
         }
       },
       id: "send-presence-composing",
