@@ -568,12 +568,13 @@ Interdiction d'hallucination : N'inventez jamais de prix, ni de disponibilité d
 
 4. INTELLIGENCE CONVERSATIONNELLE, MENU RAPIDE & QUALIFICATION NATURELLE
 • \${firstTurnInstruction}
-• Gestion intelligente des choix du Menu Rapide (si le client vient de recevoir le Menu Rapide et répond 1, 2 ou 3, ou demande l'un de ces éléments) :
-  - Choix 1 (Télécharger l'Application Mobile) : donnez immédiatement les deux liens officiels bien présentés :
+• Réponses exactes aux infos du Menu Rapide (par clic OU par question libre à tout moment) :
+  - Si le client clique sur "Télécharger l'App", tape "1", ou demande votre application par phrase libre ("où télécharger l'app ?", "ban m lyen app lan", "Android ou iPhone ?") : donnez immédiatement les deux liens officiels bien présentés :
     • Android (Google Play) : https://play.google.com/store/apps/details?id=com.wiserpos.technozi&hl=en_SG
     • iPhone / iOS (App Store) : https://apps.apple.com/us/app/technozi-haiti/id6756228637?l=es-MX
-  - Choix 2 (Voir le Site Web) : partagez le lien officiel https://technozi-ht.com (et éventuellement la Chaîne WhatsApp officielle https://whatsapp.com/channel/0029Vb7XDp3EVccQG29idN2d).
-  - Choix 3 (Nos Horaires) : donnez nos horaires d'ouverture (Lun–Ven : 8h00 – 17h00, Samedi : 8h00 – 15h00, Dimanche : Fermé) et indiquez gentiment si nos bureaux sont actuellement ouverts ou fermés selon l'heure locale d'Haïti !
+  - Si le client clique sur "Voir le Site Web", tape "2", ou demande votre site par phrase libre ("votre site web ?", "ki sit wèb nou ?") : partagez directement https://technozi-ht.com (+ la Chaîne WhatsApp https://whatsapp.com/channel/0029Vb7XDp3EVccQG29idN2d).
+  - Si le client clique sur "Nos Horaires", tape "3", ou demande vos heures d'ouverture ("à quelle heure ouvrez-vous ?", "ki lè nou fèmen ?", "êtes-vous ouverts ?") : donnez nos horaires exacts (Lun–Ven : 8h00 – 17h00, Samedi : 8h00 – 15h00, Dimanche : Fermé) et précisez gentiment si nos bureaux sont actuellement ouverts ou fermés selon l'heure locale d'Haïti !
+  - Si le client demande à VOIR LE MENU lui-même à n'importe quel moment ("menu", "meni", "montre-moi le menu", "je veux voir le menu", "mwen vle wè meni an", "show me the menu", "voir vos options") : répondez brièvement et poliment que voici le menu ci-dessous, et ajoutez obligatoirement le marqueur invisible [SHOW_MENU] à la toute fin de votre réponse pour réafficher le menu cliquable.
   - Attention au contexte : si vous venez juste de demander une quantité (ex: "Combien de caméras ?") et que le client écrit "2", c'est bien sûr une quantité et non l'option 2 du menu !
 • Premier contact simple ("Bonjou", "Bonjour", "Hello") : accueillez chaleureusement au nom de Technozi Haïti et demandez brièvement comment nous pouvons l'aider aujourd'hui (évitez les longs pavés).
 • Répondez directement à la question posée avant d'en poser une autre.
@@ -676,9 +677,19 @@ const senderPhone = prevData.senderPhone;
 const userText = prevData.userText;
 const isNewConversation = prevData.isNewConversation === true;
 
-// Nettoyage léger au cas où Gemini glisserait une syntaxe Markdown non-WhatsApp
+// Détecter si le client ou l'IA demande explicitement d'afficher le menu cliquable
+const aiAskedMenu = /\\[SHOW_MENU\\]/i.test(aiText || "");
+const trimmedUser = (userText || "").trim();
+const userAskedMenu =
+  /^(\\/?menu|meni|menú|menu rapide|meni rapid|quick menu|options|opsyon)$/i.test(trimmedUser) ||
+  /\\b(voir le menu|afficher le menu|montre[- ]?moi le menu|revoir le menu|remets? le menu|wè meni|ban m meni|afiche meni|montre m meni|show.*menu|see.*menu|open.*menu)\\b/i.test(trimmedUser);
+
+const shouldSendMenu = isNewConversation || aiAskedMenu || userAskedMenu;
+
+// Nettoyage léger au cas où Gemini glisserait des balises ou du Markdown non-WhatsApp
 if (aiText) {
   aiText = aiText
+    .replace(/\\[SHOW_MENU\\]/gi, "")
     .replace(/\\[SET_LANG:.*?\\]/gi, "")
     .replace(/\\*\\*([^*\\n]+?)\\*\\*/g, "*$1*")
     .replace(/^#{1,4}\\s+/gm, "")
@@ -688,21 +699,27 @@ if (aiText) {
 // Secours multilingue si la réponse IA était vide
 if (!aiText) {
   const lower = (userText || "").toLowerCase();
-  if (/\\b(mwen|kreyol|kreyòl|bonjou|bonswa|konbyen|enstalasyon|oubyen|tanpri|bezwen)\\b/i.test(lower)) {
-    aiText = "Mèsi dèske w kontakte *Technozi Haïti*. Nou kontan akeyi w jodi a.";
-  } else if (/\\b(hello|hi|how|much|price|need|please|want|solar|can|english|what|where)\\b/i.test(lower)) {
-    aiText = "Thank you for contacting *Technozi Haïti*. Welcome! How can we assist you today?";
+  if (/\\b(mwen|kreyol|kreyòl|bonjou|bonswa|konbyen|enstalasyon|oubyen|tanpri|bezwen|meni)\\b/i.test(lower)) {
+    aiText = shouldSendMenu && !isNewConversation
+      ? "Men meni rapid Technozi Haïti a anba a :"
+      : "Mèsi dèske w kontakte *Technozi Haïti*. Nou kontan akeyi w jodi a.";
+  } else if (/\\b(hello|hi|how|much|price|need|please|want|solar|can|english|what|where|menu)\\b/i.test(lower)) {
+    aiText = shouldSendMenu && !isNewConversation
+      ? "Here is the Technozi Haïti quick menu below:"
+      : "Thank you for contacting *Technozi Haïti*. Welcome! How can we assist you today?";
   } else {
-    aiText = "Merci d'avoir contacté *Technozi Haïti*. Bienvenue ! Comment pouvons-nous vous aider aujourd'hui ?";
+    aiText = shouldSendMenu && !isNewConversation
+      ? "Voici le menu rapide de *Technozi Haïti* ci-dessous :"
+      : "Merci d'avoir contacté *Technozi Haïti*. Bienvenue ! Comment pouvons-nous vous aider aujourd'hui ?";
   }
 }
 
-// Préparer le Menu Interactif Cliquable (sendList) et un texte de secours si début de conversation
+// Préparer le Menu Interactif Cliquable (sendList) et un texte de secours si début de conversation ou demande de menu
 const detectLang = (text) => {
   const s = (text || "").toLowerCase();
-  if (/\\b(bonjou|bonswa|byenvini|kòman|koman|mèsi|dèske|deske|akeyi|bezwen|tanpri|kisa|pou w|ede w|avè w|souple|konbyen|enstalasyon|panno|kamera|solè|sole)\\b/i.test(s)) return "kr";
-  if (/\\b(hello|welcome|how can i|how may i|assist you|help you|thank you|good morning|good afternoon|good evening|please|need|want)\\b/i.test(s)) return "en";
-  if (/\\b(hola|bienvenido|buenos días|buenas tardes|cómo puedo|en qué puedo|gracias por|ayudarle)\\b/i.test(s)) return "es";
+  if (/\\b(bonjou|bonswa|byenvini|kòman|koman|mèsi|dèske|deske|akeyi|bezwen|tanpri|kisa|pou w|ede w|avè w|souple|konbyen|enstalasyon|panno|kamera|solè|sole|meni)\\b/i.test(s)) return "kr";
+  if (/\\b(hello|welcome|how can i|how may i|assist you|help you|thank you|good morning|good afternoon|good evening|please|need|want|below)\\b/i.test(s)) return "en";
+  if (/\\b(hola|bienvenido|buenos días|buenas tardes|cómo puedo|en qué puedo|gracias por|ayudarle|menú)\\b/i.test(s)) return "es";
   return "";
 };
 const menuLang = detectLang(aiText) || detectLang(userText) || "fr";
@@ -710,7 +727,7 @@ const menuLang = detectLang(aiText) || detectLang(userText) || "fr";
 let listPayload = null;
 let fallbackMenuText = "";
 
-if (isNewConversation) {
+if (shouldSendMenu) {
   if (menuLang === "kr") {
     listPayload = {
       number: remoteJid,
@@ -810,6 +827,7 @@ return [{
     senderPhone,
     aiText,
     isNewConversation,
+    shouldSendMenu,
     listPayload,
     fallbackMenuText
   }
@@ -851,21 +869,21 @@ return [{
     },
 
     // -------------------------------------------------------------------------
-    // 9. MENU CLIQUABLE EN DÉBUT DE CONVERSATION (sendList + secours texte)
+    // 9. MENU CLIQUABLE (DÉBUT DE CONVERSATION OU DEMANDE DU MENU)
     // -------------------------------------------------------------------------
     {
       parameters: {
         conditions: {
           boolean: [
             {
-              value1: "={{ $json.isNewConversation }}",
+              value1: "={{ $json.shouldSendMenu }}",
               value2: true
             }
           ]
         }
       },
       id: "check-new-conversation",
-      name: "Début de conversation ?",
+      name: "Doit afficher le menu ?",
       type: "n8n-nodes-base.if",
       typeVersion: 1,
       position: [1440, 740]
@@ -980,10 +998,10 @@ return [{
     "3. Parser Réponse IA": {
       main: [[
         { node: "4. Envoyer Réponse WhatsApp", type: "main", index: 0 },
-        { node: "Début de conversation ?", type: "main", index: 0 }
+        { node: "Doit afficher le menu ?", type: "main", index: 0 }
       ]]
     },
-    "Début de conversation ?": {
+    "Doit afficher le menu ?": {
       main: [
         [{ node: "5. Envoyer Menu Cliquable", type: "main", index: 0 }],
         []
