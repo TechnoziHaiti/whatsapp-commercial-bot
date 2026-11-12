@@ -680,14 +680,14 @@ return [{
   3. Numéro de téléphone
   4. Produit(s) / Service(s)
   5. Quantité
-  6. Type de document souhaité (*Devis* ou *Proforma*)
+  6. Type de document souhaité (Devis ou Proforma)
   7. Zone de livraison en Haïti
 • **MÉMOIRE CUMULATIVE OBLIGATOIRE (NE RIEN OUBLIER) :**
   - Avant de répondre, relisez TOUS les messages précédents du client (listés ci-dessous et dans l'historique), même s'il y a eu un message incompréhensible entre-temps.
   - Dès que le client mentionne un produit/service (ex. "On frijidè m bezwen", "Samsung S23"), **CONFIRMEZ-LE explicitement dès la 1re ligne** puis annoncez que l'équipe va vérifier, et demandez en bullet points UNIQUEMENT les éléments encore manquants (ne redemandez JAMAIS "Produit" si le produit est déjà donné !).
     - Exemple KR : "Nou note : *Frijidè*. Nou pral verifye sa ak ekip la. Antretan, tanpri voye m sa ki manke yo :"
     - Exemple FR : "Noté pour : *Réfrigérateur*. Nous allons vérifier cela avec l'équipe. Entre-temps, laissez-nous ce qui manque :"
-  - Aux messages suivants, rappelez en **1 ligne très courte** tout ce qui est déjà retenu depuis le début (y compris le produit du 1er message !) puis demandez UNIQUEMENT ce qui manque encore. S'il ne reste qu'1 ou 2 infos (ex. juste *Devis ou Proforma*), posez directement la question courte sans remettre la liste complète.
+  - Aux messages suivants, rappelez en **1 ligne très courte** tout ce qui est déjà retenu depuis le début (y compris le produit du 1er message !) puis demandez UNIQUEMENT ce qui manque encore. S'il ne reste qu'1 ou 2 infos (ex. juste Devis ou Proforma), posez directement la question courte sans remettre la liste complète.
   - Comprenez les quantités naturelles : en Kreyòl, « on seul » / « yon sèl » / « youn » = Quantité *1*.
   - N'affichez JAMAIS le numéro WhatsApp du chat entre parenthèses dans la liste à remplir (n'utilisez ce numéro que si le client écrit « même numéro » / « menm nimewo a »).
 • Exception sécurité uniquement : pour une demande manifestement illégale (ex: armes, drogues), répondez en 1 phrase neutre que Technozi ne traite pas ce type de demande, sans parler de stock.
@@ -707,7 +707,7 @@ Répondez EXCLUSIVEMENT dans la langue indiquée par « Langue active obligatoir
 • Soyez très bref : 1 courte ligne confirmant ce qui est déjà noté + uniquement ce qui manque (jamais de longs paragraphes).
 • N'utilisez le prénom du client que s'il s'est présenté lui-même (ne confondez pas le prénom d'un tiers cité dans son message avec le client).
 • Zéro prix ni estimation chiffrée. Ne dites "Tapez 4 ou 5" que si le client demande les options, jamais quand il exprime déjà sa demande.
-• Format WhatsApp : *gras* avec UNE SEULE étoile (jamais **double étoile**, jamais ###). 0 à 1 émoji sobre max (jamais 🙃).
+• Format WhatsApp : utilisez toujours « • » pour les puces (jamais « * » en début de puce). N'utilisez *gras* (avec UNE SEULE étoile, jamais **double étoile**, jamais ###) que pour les titres ou le nom du produit, jamais à l'intérieur des bullet points. 0 à 1 émoji sobre max (jamais 🙃).
 
 4. INFOS OFFICIELLES TECHNOZI (FONCTIONNEMENT UNIQUEMENT)
 • Site Web : https://technozi-ht.com
@@ -791,7 +791,7 @@ const visibleParts = parts
   .filter(p => !p.thought && typeof p.text === "string")
   .map(p => p.text);
 
-let aiText = (visibleParts.join("\\n") || candidate?.content?.parts?.[0]?.text || "").trim();
+let aiText = (visibleParts.join("") || candidate?.content?.parts?.[0]?.text || "").trim();
 
 // Récupération sécurisée du nœud filtre (résiste même en cas de renommage n8n ...1)
 let prevData = null;
@@ -819,7 +819,9 @@ const aiAskedOptions = /\\[(SHOW_OPTIONS|SHOW_MENU)\\]/i.test(aiText || "");
 if (aiText) {
   aiText = aiText
     .replace(/\\[(?:LANGUE ACTIVE[^\\]]*|SHOW_OPTIONS|SHOW_MENU|SET_LANG:[^\\]]*)\\]/gi, "")
+    .replace(/\\*[ \\t]*\\n[ \\t]*([^\\n*]+?\\*)/g, "*$1")
     .replace(/\\*\\*([^*\\n]+?)\\*\\*/g, "*$1*")
+    .replace(/^[ \\t]*[-*][ \\t]+/gm, "• ")
     .replace(/^#{1,4}\\s+/gm, "")
     .trim();
 }
