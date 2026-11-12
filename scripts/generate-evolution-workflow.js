@@ -55,7 +55,7 @@ const workflow = {
           (() => {
             const data = $json;
             const b64 = data?.base64 || data?.qrcode?.base64 || "";
-            const isConnected = data?.instance?.status === "open" || data?.status === "open" || data?.state === "open";
+            const isConnected = data?.instance?.status === "open" || data?.instance?.state === "open" || data?.status === "open" || data?.state === "open";
             
             if (isConnected) {
               return \`<!DOCTYPE html>
