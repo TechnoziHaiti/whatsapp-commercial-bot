@@ -235,6 +235,17 @@ if (
   return [];
 }
 
+// Ignorer les messages périmés / rejoués après reconnexion (> 3 minutes d'âge)
+const rawTs = data.messageTimestamp;
+let msgTsSec = Number(rawTs && typeof rawTs === "object" ? (rawTs.low ?? 0) : rawTs);
+if (msgTsSec > 1e12) msgTsSec = Math.floor(msgTsSec / 1000);
+if (Number.isFinite(msgTsSec) && msgTsSec > 0) {
+  const ageSec = Math.floor(Date.now() / 1000) - msgTsSec;
+  if (ageSec > 180) {
+    return [];
+  }
+}
+
 // Anti-doublon strict par ID de message
 const msgId = key.id;
 if (msgId && staticData.processedIds.includes(msgId)) {
@@ -388,10 +399,10 @@ const isNewConversation = history.length === 0;
 // Détecter la langue active (priorité au dernier message avec mots clairs, sinon historique)
 const detectLangCode = (t) => {
   const s = (t || "").toLowerCase();
-  if (/\\b(bonjou|bonswa|sak pase|kòman|koman|mwen|konbyen|koute|enstalasyon|bezwen|nan|pou|devi|pwofòma|tanpri|mèsi|pa gen|lòt|biwo|meni|opsyon|kamera|panno|oubyen|rezime|wi|kote|epitou)\\b|solè(?![a-zà-ÿ])/i.test(s)) return "kr";
+  if (/\\b(bonjou|rebonjou|bonswa|sak pase|kòman|koman|mwen|mw|mp|map|banm|ekrim|ekri|konprann|raple|konbyen|koute|enstalasyon|bezwen|nan|pou|devi|pwofòma|tanpri|mèsi|pa gen|lòt|biwo|meni|opsyon|kamera|panno|oubyen|rezime|wi|kote|epitou|paske|anpil|kounye|toujou|bagay|materyel|mesye|ayiti)\\b|solè(?![a-zà-ÿ])/i.test(s)) return "kr";
   if (/\\b(hello|hi|hey|yes|yeah|good morning|good afternoon|good evening|how much|what are|do you|can you|i need|we need|i want|we want|quote|proforma invoice|price|pricing|cost|opening|website|download|please|thanks|thank you|nothing else|that's all|show.*menu|show.*options)\\b/i.test(s)) return "en";
   if (/\\b(hola|buenos|buenas|cotización|necesito|quiero|cuánto|cuanto|gracias|por favor|horarios|sitio web|descargar|nada más|eso es todo)\\b|menú(?![a-zà-ÿ])/i.test(s)) return "es";
-  if (/\\b(bonjour|bonsoir|salut|oui|non|devis|combien|coûte|coute|installation|besoin|je veux|nous voulons|voudrais|souhaite|merci|rien d'autre|c'est tout|horaires?|télécharger|application|site web|voir|afficher|s'il vous plaît|svp)\\b/i.test(s)) return "fr";
+  if (/\\b(bonjour|rebonjour|bonsoir|salut|oui|non|devis|combien|coûte|coute|installation|besoin|je veux|nous voulons|voudrais|souhaite|merci|rien d'autre|c'est tout|horaires?|télécharger|application|site web|voir|afficher|s'il vous plaît|svp)\\b/i.test(s)) return "fr";
   return "";
 };
 
@@ -407,7 +418,7 @@ activeLang = activeLang || "fr";
 const trimmedLower = userText.trim().toLowerCase();
 const isSimpleGreeting =
   isResetCommand ||
-  (isNewConversation && /^(bonjou|bonswa|sak pase|bonjour|bonsoir|salut|hello|hi|hey|hola|buenos d[ií]as|good morning|good afternoon|good evening)[!.,?\\s]*$/i.test(trimmedLower));
+  (isNewConversation && /^(bonjou|rebonjou|bonswa|sak pase|bonjour|rebonjour|bonsoir|salut|hello|hi|hey|hola|buenos d[ií]as|good morning|good afternoon|good evening)[!.,?\\s]*$/i.test(trimmedLower));
 const isMenuCommand =
   /^(\\/?menu|meni|menú|options?|opsyon|menu rapide|meni rapid|options? rapides?|quick menu|quick options)(?:\\s+(?:svp|s'il vous pla[îi]t|please|pls|tanpri|por favor))?[!.,?\\s]*$/i.test(trimmedLower) ||
   /\\b(voir le menu|afficher le menu|montre[- ]?moi le menu|revoir le menu|remets? le menu|donne[- ]?moi le menu|voir les options|afficher les options|montre[- ]?moi les options|quelles? sont (?:vos|les) options|wè meni|ban ?m(?:wen)? meni|afiche meni|montre ?m meni|wè opsyon|ban ?m(?:wen)? opsyon|ki opsyon|show.*menu|see.*menu|show.*options|see.*options)\\b/i.test(trimmedLower);
@@ -625,8 +636,8 @@ return [{
             const systemPrompt = \`Vous êtes Pitonbot, l'assistant WhatsApp de Technozi Haïti ("Faster & Easier").
 
 1. LANGUE OBLIGATOIRE (ZÉRO MÉLANGE)
-Répondez EXCLUSIVEMENT dans la langue indiquée par [LANGUE ACTIVE] (ou dans la nouvelle langue si le client vient d'en changer avec ses propres mots), sans JAMAIS mélanger des mots d'une autre langue :
-• En Français : utilisez "devis", "proforma" (jamais de mot créole).
+Répondez EXCLUSIVEMENT dans la langue indiquée par « Langue active obligatoire » ci-dessous (sans JAMAIS recopier d'instructions système ni mélanger des mots d'une autre langue) :
+• En Français : utilisez "en Haïti" (JAMAIS "an Ayiti"), "devis", "proforma" (zéro mot créole).
 • En Kreyòl : créole haïtien simple et naturel ("Bonjou", "Bonswa", "ki vil oswa zòn an Ayiti", "kit Starlink", "kamera", "panno solè", "devi", "pwofòma"). RÈGLE CRITIQUE : en créole, le pays « Haïti » se dit toujours *Ayiti* (« an Ayiti »), JAMAIS « an Ayisyen ».
 • En English : natural concise English ("Quote", "Proforma Invoice").
 • En Español : español claro y directo ("Cotización", "Factura Proforma").
@@ -634,8 +645,8 @@ Répondez EXCLUSIVEMENT dans la langue indiquée par [LANGUE ACTIVE] (ou dans la
 2. STYLE — ULTRA-DIRECT, SEC ET TRANCHANT
 • 1 à 2 phrases courtes maximum par réponse (sauf liens, horaires ou récapitulatif final).
 • INTERDIT : formules de politesse longues ("C'est un plaisir...", "Merci de nous avoir contactés", "N'hésitez surtout pas..."). Allez droit au but.
-• Accusez brièvement réception des infos reçues (ex: "Noté —", "Mèsi [Nom] —") puis demandez uniquement l'info encore manquante, sans jamais redemander ce qui est déjà dit ni le téléphone (\${phoneDisplay}).
-• Format WhatsApp : *gras* avec UNE SEULE étoile (jamais **double étoile**, jamais ###). 0 à 1 émoji max par message.
+• Accusez brièvement réception des infos reçues ("Noté —", "Mèsi —") puis demandez uniquement l'info encore manquante. N'utilisez le prénom du client que s'il s'est présenté lui-même (ne confondez pas le prénom d'un tiers cité dans sa phrase avec le client). Ne redemandez jamais le téléphone (\${phoneDisplay}).
+• Format WhatsApp : *gras* avec UNE SEULE étoile (jamais **double étoile**, jamais ###). 0 à 1 émoji sobre max (jamais 🙃).
 
 3. RÈGLE ABSOLUE : ZÉRO PRIX NI ESTIMATION
 • Ne donnez JAMAIS de prix, fourchette ou montant estimatif.
@@ -675,20 +686,21 @@ Libellés selon langue :
 Ajoutez juste en dessous 1 phrase courte confirmant que l'équipe Technozi prend le relais rapidement.
 
 Contexte actuel :
+• Langue active obligatoire pour cette réponse : \${activeLangLabel}
 • Date / Heure locale Haïti : \${haitiTimeInfo}
 • Nom WhatsApp affiché : \${clientName}
 • Numéro WhatsApp client : \${phoneDisplay}\`;
 
             const contents = [
               { role: "user", parts: [{ text: systemPrompt }] },
-              { role: "model", parts: [{ text: "Compris. Réponses ultra-directes en 1–2 phrases max dans la langue exacte du client, options 4 (Devis) et 5 (Proforma) distinctes, et récapitulatif final complet systématique." }] }
+              { role: "model", parts: [{ text: "Compris. Réponses ultra-directes en 1–2 phrases max dans la langue exacte demandée, sans aucune balise technique, options 4 (Devis) et 5 (Proforma) distinctes, et récapitulatif final complet systématique." }] }
             ];
 
             for (const h of history.slice(-16)) {
               contents.push({ role: h.role, parts: [{ text: h.text }] });
             }
 
-            contents.push({ role: "user", parts: [{ text: "[LANGUE ACTIVE OBLIGATOIRE : " + activeLangLabel + "]\\n" + userText }] });
+            contents.push({ role: "user", parts: [{ text: userText }] });
 
             return {
               contents: contents,
@@ -750,11 +762,10 @@ const activeLang = prevData.activeLang || "fr";
 
 const aiAskedOptions = /\\[(SHOW_OPTIONS|SHOW_MENU)\\]/i.test(aiText || "");
 
-// Nettoyage Markdown non-WhatsApp
+// Nettoyage Markdown non-WhatsApp et suppression défensive de toute balise interne
 if (aiText) {
   aiText = aiText
-    .replace(/\\[(SHOW_OPTIONS|SHOW_MENU)\\]/gi, "")
-    .replace(/\\[SET_LANG:.*?\\]/gi, "")
+    .replace(/\\[(?:LANGUE ACTIVE[^\\]]*|SHOW_OPTIONS|SHOW_MENU|SET_LANG:[^\\]]*)\\]/gi, "")
     .replace(/\\*\\*([^*\\n]+?)\\*\\*/g, "*$1*")
     .replace(/^#{1,4}\\s+/gm, "")
     .trim();
