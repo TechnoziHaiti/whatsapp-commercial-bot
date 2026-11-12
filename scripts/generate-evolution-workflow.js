@@ -183,6 +183,7 @@ const staticData = $getWorkflowStaticData('global');
 staticData.pausedUntil = staticData.pausedUntil || {};
 staticData.conversations = staticData.conversations || {};
 staticData.lastActive = staticData.lastActive || {};
+staticData.lastDayKey = staticData.lastDayKey || {};
 staticData.recentBotTexts = staticData.recentBotTexts || {};
 staticData.processedIds = staticData.processedIds || [];
 
@@ -342,10 +343,15 @@ if (fromMe) {
         role: "model",
         text: "[Réponse envoyée par un conseiller humain Technozi] : " + extractedText
       });
-      if (staticData.conversations[remoteJid].length > 16) {
-        staticData.conversations[remoteJid] = staticData.conversations[remoteJid].slice(-16);
+      if (staticData.conversations[remoteJid].length > 24) {
+        staticData.conversations[remoteJid] = staticData.conversations[remoteJid].slice(-24);
       }
       staticData.lastActive[remoteJid] = Date.now();
+      try {
+        staticData.lastDayKey[remoteJid] = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Port-au-Prince' });
+      } catch (e) {
+        staticData.lastDayKey[remoteJid] = new Date().toISOString().slice(0, 10);
+      }
     }
   }
   return [];
@@ -365,11 +371,25 @@ const senderPhone = phoneJid.includes("@s.whatsapp.net")
   : "";
 const pushName = (data.pushName || "").trim() || "Client";
 
-// Expiration automatique de la mémoire de discussion après 12h d'inactivité
-if (staticData.lastActive[remoteJid] && (Date.now() - staticData.lastActive[remoteJid] > 12 * 60 * 60 * 1000)) {
+// Suivi du jour calendaire (heure d'Haïti) + expiration après 12h d'inactivité
+const nowMs = Date.now();
+let haitiDayKey = "";
+try {
+  haitiDayKey = new Date(nowMs).toLocaleDateString('en-CA', { timeZone: 'America/Port-au-Prince' });
+} catch (e) {
+  haitiDayKey = new Date(nowMs).toISOString().slice(0, 10);
+}
+const prevDayKey = staticData.lastDayKey[remoteJid] || "";
+const prevActiveAt = staticData.lastActive[remoteJid] || 0;
+const isCalendarDayChanged = Boolean(prevDayKey && haitiDayKey && prevDayKey !== haitiDayKey);
+const isInactiveExpired = Boolean(prevActiveAt && (nowMs - prevActiveAt > 12 * 60 * 60 * 1000));
+let isNewDay = !prevDayKey || isCalendarDayChanged;
+
+if (isCalendarDayChanged || isInactiveExpired) {
   delete staticData.conversations[remoteJid];
 }
-staticData.lastActive[remoteJid] = Date.now();
+staticData.lastActive[remoteJid] = nowMs;
+staticData.lastDayKey[remoteJid] = haitiDayKey;
 
 let userText = extractedText;
 let isResetCommand = false;
@@ -378,6 +398,7 @@ let isResetCommand = false;
 if (userText && userText.toLowerCase().match(/^(\\/reset|reset bot|reinitialiser)$/)) {
   delete staticData.conversations[remoteJid];
   isResetCommand = true;
+  isNewDay = true;
   userText = "Bonjour";
 }
 
@@ -399,7 +420,7 @@ const isNewConversation = history.length === 0;
 // Détecter la langue active (priorité au dernier message avec mots clairs, sinon historique)
 const detectLangCode = (t) => {
   const s = (t || "").toLowerCase();
-  if (/\\b(bonjou|rebonjou|bonswa|sak pase|kòman|koman|mwen|mw|mp|map|banm|ekrim|ekri|konprann|raple|konbyen|koute|enstalasyon|bezwen|nan|pou|devi|pwofòma|tanpri|mèsi|pa gen|lòt|biwo|meni|opsyon|kamera|panno|oubyen|rezime|wi|kote|epitou|paske|anpil|kounye|toujou|bagay|materyel|mesye|ayiti|nou|vann|eske|èske|zam|telefòn|telefon|genyen|chèche|sèvis|presize|dakò|erè|chanje|modifye|imèl|kantite|livrezon|nimewo)\\b|solè(?![a-zà-ÿ])/i.test(s)) return "kr";
+  if (/\\b(bonjou|rebonjou|bonswa|sak pase|kòman|koman|mwen|mw|mp|map|banm|ekrim|ekri|konprann|raple|konbyen|koute|enstalasyon|bezwen|nan|pou|devi|pwofòma|tanpri|mèsi|pa gen|lòt|biwo|meni|opsyon|kamera|panno|oubyen|rezime|wi|kote|epitou|paske|anpil|kounye|toujou|bagay|materyel|mesye|ayiti|nou|vann|eske|èske|zam|telefòn|telefon|genyen|chèche|sèvis|presize|dakò|erè|chanje|modifye|imèl|kantite|livrezon|nimewo|antrepriz|frijidè|frijide|on seul|yon sèl|zòn)\\b|solè(?![a-zà-ÿ])/i.test(s)) return "kr";
   if (/\\b(hello|hi|hey|yes|yeah|good morning|good afternoon|good evening|how much|what are|do you|can you|i need|we need|i want|we want|quote|proforma invoice|price|pricing|cost|opening|website|download|please|thanks|thank you|nothing else|that's all|show.*menu|show.*options|wrong|change|modify|update|mistake|sell|available|availability|delivery)\\b/i.test(s)) return "en";
   if (/\\b(hola|buenos|buenas|cotización|necesito|quiero|cuánto|cuanto|gracias|por favor|horarios|sitio web|descargar|nada más|eso es todo|cambiar|modificar|error|entrega)\\b|menú(?![a-zà-ÿ])/i.test(s)) return "es";
   if (/\\b(bonjour|rebonjour|bonsoir|salut|oui|non|devis|combien|coûte|coute|installation|besoin|je veux|nous voulons|voudrais|souhaite|merci|rien d'autre|c'est tout|horaires?|télécharger|application|site web|voir|afficher|s'il vous plaît|svp|proposez|vendez|avez|avez-vous|est-ce|nous|vous|votre|quel|quelle|erreur|changer|modifier|quantité|livraison|disponibilité|tarif)\\b/i.test(s)) return "fr";
@@ -433,6 +454,8 @@ return [{
     userText,
     history,
     isNewConversation,
+    isNewDay,
+    haitiDayKey,
     activeLang,
     isInstantMenu,
     isSystemAlert: false
@@ -549,8 +572,8 @@ if (staticData.recentBotTexts[remoteJid].length > 8) {
 staticData.conversations[remoteJid] = staticData.conversations[remoteJid] || [];
 staticData.conversations[remoteJid].push({ role: "user", text: userText });
 staticData.conversations[remoteJid].push({ role: "model", text: aiText });
-if (staticData.conversations[remoteJid].length > 16) {
-  staticData.conversations[remoteJid] = staticData.conversations[remoteJid].slice(-16);
+if (staticData.conversations[remoteJid].length > 24) {
+  staticData.conversations[remoteJid] = staticData.conversations[remoteJid].slice(-24);
 }
 
 return [{
@@ -619,6 +642,8 @@ return [{
             const phone = $json.senderPhone;
             const phoneDisplay = phone ? ("+" + phone) : "Non visible";
             const history = $json.history || [];
+            const isNewDay = $json.isNewDay !== false;
+            const isOngoingSameDay = !isNewDay && history.length > 0;
             const activeLangCode = $json.activeLang || "fr";
             const langNames = { kr: "Kreyòl", en: "English", es: "Español", fr: "Français" };
             const activeLangLabel = langNames[activeLangCode] || "Français";
@@ -626,40 +651,60 @@ return [{
             let haitiTimeInfo = "";
             try {
               const now = new Date();
-              const jour = now.toLocaleDateString('fr-FR', { timeZone: 'America/Port-au-Prince', weekday: 'long' });
+              const dateFull = now.toLocaleDateString('fr-FR', { timeZone: 'America/Port-au-Prince', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
               const heure = now.toLocaleTimeString('fr-FR', { timeZone: 'America/Port-au-Prince', hour: '2-digit', minute: '2-digit' });
-              haitiTimeInfo = jour + " à " + heure + " (heure d'Haïti)";
+              haitiTimeInfo = dateFull + " à " + heure + " (heure d'Haïti)";
             } catch (e) {
               haitiTimeInfo = "Haïti";
             }
 
+            const dayStatusText = isOngoingSameDay
+              ? "MÊME CONVERSATION EN COURS AUJOURD'HUI (discussion déjà entamée aujourd'hui : NE DITES PAS 'aujourd'hui', 'jodi a', 'today', 'hoy' ni formule de bienvenue)"
+              : "NOUVEAU JOUR (premier échange de la journée avec ce client)";
+
+            const prevClientMsgs = history
+              .filter(h => h.role === "user" && h.text)
+              .slice(-10)
+              .map((h, i) => (i + 1) + ") " + h.text)
+              .join(" | ");
+            const clientMemoryLine = prevClientMsgs || "Aucun message précédent";
+
             const systemPrompt = \`Vous êtes Pitonbot, l'assistant réceptionniste WhatsApp de Technozi Haïti ("Faster & Easier").
 
-1. RÈGLE FONDAMENTALE — VOUS NE CONNAISSEZ PAS LES PRODUITS NI LE STOCK
+1. RÈGLE FONDAMENTALE — RÉCEPTIONNISTE COLLECTEUR (SANS BASE DE STOCK)
 • Vous connaissez UNIQUEMENT le fonctionnement de l'entreprise (horaires, site, apps, chaîne WhatsApp, devis/proforma) et vous êtes chargé de RECUEILLIR les demandes pour l'administration.
 • Vous n'avez AUCUNE base de données produits/stock : il est STRICTEMENT IMPOSSIBLE d'affirmer « nous avons ceci » ou « nous n'avons pas cela » (ne citez aucune liste de produits que l'entreprise vendrait ou ne vendrait pas).
-• Pour toute demande de produit, service, disponibilité ou prix :
-  1) Répondez en **1 phrase courte** que nous allons vérifier cela avec l'équipe / l'administration (ne dites pas au passé "j'ai déjà transmis" tant que les infos ne sont pas reçues ; dites plutôt FR "Nous allons vérifier cela avec l'équipe. Entre-temps, laissez-nous ces infos :" / KR "Nou pral verifye sa ak ekip la. Antretan, tanpri voye m enfòmasyon sa yo :").
-  2) Listez aussitôt en **bullet points courts** UNIQUEMENT les infos pas encore fournies parmi ces 5 champs :
-     • Nom & Prénom (ou Entreprise)
-     • E-mail
-     • Numéro de téléphone
-     • Produit(s) & Quantité (+ préciser Devis ou Proforma)
-     • Zone de livraison en Haïti
+• Les 7 éléments à recueillir sur l'ensemble de la conversation sont :
+  1. Nom & Prénom (ou Entreprise)
+  2. E-mail
+  3. Numéro de téléphone
+  4. Produit(s) / Service(s)
+  5. Quantité
+  6. Type de document souhaité (*Devis* ou *Proforma*)
+  7. Zone de livraison en Haïti
+• **MÉMOIRE CUMULATIVE OBLIGATOIRE (NE RIEN OUBLIER) :**
+  - Avant de répondre, relisez TOUS les messages précédents du client (listés ci-dessous et dans l'historique), même s'il y a eu un message incompréhensible entre-temps.
+  - Dès que le client mentionne un produit/service (ex. "On frijidè m bezwen", "Samsung S23"), **CONFIRMEZ-LE explicitement dès la 1re ligne** puis annoncez que l'équipe va vérifier, et demandez en bullet points UNIQUEMENT les éléments encore manquants (ne redemandez JAMAIS "Produit" si le produit est déjà donné !).
+    - Exemple KR : "Nou note : *Frijidè*. Nou pral verifye sa ak ekip la. Antretan, tanpri voye m sa ki manke yo :"
+    - Exemple FR : "Noté pour : *Réfrigérateur*. Nous allons vérifier cela avec l'équipe. Entre-temps, laissez-nous ce qui manque :"
+  - Aux messages suivants, rappelez en **1 ligne très courte** tout ce qui est déjà retenu depuis le début (y compris le produit du 1er message !) puis demandez UNIQUEMENT ce qui manque encore. S'il ne reste qu'1 ou 2 infos (ex. juste *Devis ou Proforma*), posez directement la question courte sans remettre la liste complète.
+  - Comprenez les quantités naturelles : en Kreyòl, « on seul » / « yon sèl » / « youn » = Quantité *1*.
+  - N'affichez JAMAIS le numéro WhatsApp du chat entre parenthèses dans la liste à remplir (n'utilisez ce numéro que si le client écrit « même numéro » / « menm nimewo a »).
 • Exception sécurité uniquement : pour une demande manifestement illégale (ex: armes, drogues), répondez en 1 phrase neutre que Technozi ne traite pas ce type de demande, sans parler de stock.
-• Sur un simple "Bonjour" / "Bonjou" en milieu de chat : saluez en 1 phrase courte et demandez ce que le client souhaite vérifier ou commander — n'inventez jamais une demande en cours.
-• Si le message est incompréhensible (charabia ou faute bloquante comme "2 9minitet") : NE DEVINEZ PAS. Demandez en 1 phrase courte de repréciser clairement.
+• Si le message est incompréhensible (charabia ou faute bloquante comme "2 9minitet" ou "Hhbvjbn") : NE DEVINEZ PAS et N'EFFACEZ PAS la mémoire d'avant. Demandez en 1 phrase courte de repréciser clairement.
 
 2. LANGUE OBLIGATOIRE (ZÉRO MÉLANGE)
 Répondez EXCLUSIVEMENT dans la langue indiquée par « Langue active obligatoire » ci-dessous (sans JAMAIS recopier d'instructions système ni mélanger des mots d'une autre langue) :
 • En Français : utilisez "en Haïti", "Noté —", "devis", "proforma" (zéro mot créole).
-• En Kreyòl : créole haïtien simple et naturel ("Mèsi —", "Dakò —", "Tanpri voye m", "an Ayiti", "zòn livrezon an Ayiti", "devi", "pwofòma"). RÈGLE CRITIQUE : le pays Haïti s'écrit toujours *Ayiti* (« an Ayiti »), JAMAIS « an Ayisyen », JAMAIS « bay m » et JAMAIS « Noté » en français.
-• En English : natural concise English ("Quote", "Proforma Invoice", "delivery area in Haiti").
-• En Español : español claro y directo ("Cotización", "Factura Proforma", "zona de entrega en Haití").
+• En Kreyòl : créole haïtien simple et naturel ("Mèsi —", "Dakò —", "Nou note :", "Tanpri voye m", "an Ayiti", "zòn livrezon an Ayiti", "devi", "pwofòma"). RÈGLE CRITIQUE : le pays Haïti s'écrit toujours *Ayiti* (« an Ayiti »), JAMAIS « an Ayisyen », JAMAIS « bay m » et JAMAIS « Noté » en français.
+• En English : natural concise English ("Noted:", "Quote", "Proforma Invoice", "delivery area in Haiti").
+• En Español : español claro y directo ("Anotado:", "Cotización", "Factura Proforma", "zona de entrega en Haití").
 
-3. STYLE — ULTRA-COURT ET TRANCHANT
-• Soyez très bref : 1 courte phrase + bullet points des infos manquantes uniquement (jamais de longs paragraphes ni formules longues).
-• Accusez brièvement réception des infos reçues puis demandez uniquement ce qui manque. Ne redemandez JAMAIS une info déjà donnée. Si le client écrit « même numéro » / « menm nimewo a », notez \${phoneDisplay}.
+3. STYLE — CONTINUITÉ DU JOUR & CONCISION
+• **RÈGLE DU JOUR / ANTI-RÉPÉTITION :**
+  - Si Statut du jour = *MÊME CONVERSATION EN COURS AUJOURD'HUI* : il est **STRICTEMENT INTERDIT** de dire « Que puis-je faire pour vous aujourd'hui ? », « Comment puis-je vous aider aujourd'hui ? », « aujourd'hui », « jodi a », « today », « hoy » ou « Bienvenue ». Même si le client dit « Bonjour » / « Rebonjour » / « Merci » au milieu du même jour, enchaînez directement (ex. « Rebonjour — » puis poursuivez la collecte en cours, ou demandez simplement ce qu'il souhaite vérifier sans dire « aujourd'hui »).
+  - Si Statut du jour = *NOUVEAU JOUR* : vous pouvez saluer brièvement pour la nouvelle journée si adapté.
+• Soyez très bref : 1 courte ligne confirmant ce qui est déjà noté + uniquement ce qui manque (jamais de longs paragraphes).
 • N'utilisez le prénom du client que s'il s'est présenté lui-même (ne confondez pas le prénom d'un tiers cité dans son message avec le client).
 • Zéro prix ni estimation chiffrée. Ne dites "Tapez 4 ou 5" que si le client demande les options, jamais quand il exprime déjà sa demande.
 • Format WhatsApp : *gras* avec UNE SEULE étoile (jamais **double étoile**, jamais ###). 0 à 1 émoji sobre max (jamais 🙃).
@@ -676,11 +721,11 @@ Répondez EXCLUSIVEMENT dans la langue indiquée par « Langue active obligatoir
 • Option *1* (ou demande sur l'app) : donnez directement les 2 liens (Android + iOS) sans paragraphe autour.
 • Option *2* (ou demande sur le site) : donnez directement https://technozi-ht.com + Chaîne WhatsApp.
 • Option *3* (ou horaires) : donnez les horaires exacts + précisez si nos bureaux sont actuellement ouverts ou fermés selon l'heure locale d'Haïti ci-dessous.
-• Option *4* (*Devis*) ou Option *5* (*Proforma*) : demandez en bullet points courts les 5 infos manquantes (Nom & Prénom / Entreprise, E-mail, Numéro de téléphone, Produit(s) & Quantité, Zone de livraison en Haïti).
+• Option *4* (*Devis*) ou Option *5* (*Proforma*) : le type (Devis ou Proforma) est déjà choisi ! Demandez en bullet points courts uniquement les autres infos manquantes (Nom & Prénom / Entreprise, E-mail, Numéro de téléphone, Produit(s), Quantité, Zone de livraison en Haïti).
 • Si le client demande à revoir le menu / les options : 1 courte phrase + [SHOW_OPTIONS].
 
 6. CLÔTURE ET MODIFICATION DU RÉCAPITULATIF (POUR L'ADMINISTRATION)
-• Dès que vous avez les 5 infos (Nom/Entreprise, E-mail, Téléphone, Produit & Quantité, Zone de livraison en Haïti) ET que le client indique qu'il n'a rien à ajouter ("c'est tout", "rien d'autre", "oui", "merci", "pa gen lòt", "se sa", "non mèsi", "that's all") : **NE POSEZ PLUS AUCUNE QUESTION DE CONFIRMATION**. Générez IMMÉDIATEMENT le Récapitulatif complet structuré 100 % dans sa langue :
+• Dès que vous avez les 7 éléments (Nom/Entreprise, E-mail, Téléphone, Produit(s), Quantité, Devis ou Proforma, Zone de livraison en Haïti) — et que le client ne semble rien ajouter ou valide ("c'est tout", "rien d'autre", "oui", "merci", "pa gen lòt", "se sa", "non mèsi", "that's all", ou s'il vient de fournir la dernière info manquante) : générez IMMÉDIATEMENT le Récapitulatif complet structuré 100 % dans sa langue (avec TOUTES les infos recueillies depuis le début, sans perdre le produit du 1er message) :
 
 Libellés selon langue :
 - Français : 📋 *Récapitulatif pour l'administration Technozi* (Nom & Prénom / Entreprise, E-mail, Téléphone, Type : Devis/Proforma, Produit(s) & Quantité, Zone de livraison en Haïti)
@@ -693,15 +738,17 @@ Libellés selon langue :
 Contexte actuel :
 • Langue active obligatoire pour cette réponse : \${activeLangLabel}
 • Date / Heure locale Haïti : \${haitiTimeInfo}
+• Statut du jour : \${dayStatusText}
+• Messages précédents du client (à retenir intégralement) : \${clientMemoryLine}
 • Nom WhatsApp affiché : \${clientName}
-• Numéro WhatsApp du chat : \${phoneDisplay}\`;
+• Numéro WhatsApp du chat (uniquement si "même numéro") : \${phoneDisplay}\`;
 
             const contents = [
               { role: "user", parts: [{ text: systemPrompt }] },
-              { role: "model", parts: [{ text: "Compris. Aucun avis sur le stock ou catalogue, collecte brève en bullet points des 5 infos manquantes, récapitulatif complet pour l'administration et mise à jour immédiate si le client signale une erreur." }] }
+              { role: "model", parts: [{ text: "Compris. Mémoire cumulative stricte de tous les messages client (produit, quantité, coordonnées), respect du statut du jour (jamais 'aujourd'hui' dans un échange déjà en cours le même jour), collecte ultra-courte des seuls éléments manquants, récapitulatif complet et correction immédiate sur demande." }] }
             ];
 
-            for (const h of history.slice(-16)) {
+            for (const h of history.slice(-24)) {
               contents.push({ role: h.role, parts: [{ text: h.text }] });
             }
 
@@ -820,13 +867,13 @@ if (staticData.recentBotTexts[remoteJid].length > 8) {
   staticData.recentBotTexts[remoteJid] = staticData.recentBotTexts[remoteJid].slice(-8);
 }
 
-// Mettre à jour l'historique de conversation (16 messages = 8 allers-retours complets)
+// Mettre à jour l'historique de conversation (24 messages = 12 allers-retours complets)
 staticData.conversations[remoteJid] = staticData.conversations[remoteJid] || [];
 staticData.conversations[remoteJid].push({ role: "user", text: userText });
 staticData.conversations[remoteJid].push({ role: "model", text: aiText });
 
-if (staticData.conversations[remoteJid].length > 16) {
-  staticData.conversations[remoteJid] = staticData.conversations[remoteJid].slice(-16);
+if (staticData.conversations[remoteJid].length > 24) {
+  staticData.conversations[remoteJid] = staticData.conversations[remoteJid].slice(-24);
 }
 
 return [{
