@@ -402,7 +402,7 @@ if (fromMe) {
   );
 
   if (hasRealContent) {
-    staticData.pausedUntil[remoteJid] = Date.now() + (15 * 60 * 1000); // Pause IA de 15 minutes
+    staticData.pausedUntil[remoteJid] = Date.now() + (60 * 60 * 1000); // Pause IA de 60 minutes (prise en main humaine)
     // Mémoriser brièvement la réponse humaine pour la continuité si l'IA reprend plus tard
     if (extractedText) {
       staticData.conversations[remoteJid] = staticData.conversations[remoteJid] || [];
@@ -436,6 +436,25 @@ const phoneJid = (key.remoteJidAlt && key.remoteJidAlt.includes("@s.whatsapp.net
 const senderPhone = phoneJid.includes("@s.whatsapp.net")
   ? phoneJid.replace("@s.whatsapp.net", "").replace(/[^0-9]/g, "")
   : "";
+
+// =========================================================================
+// RÈGLE ABSOLUE : NUMÉROS INTERNES TECHNOZI IGNORÉS (SILENCE TOTAL DU BOT)
+// =========================================================================
+const IGNORED_TEAM_NUMBERS = [
+  "50946405968", // Administratrice
+  "50948861464", // Équipe interne Technozi
+  "50937030009"  // Technozi Bot lui-même
+];
+
+if (
+  IGNORED_TEAM_NUMBERS.some(num =>
+    (senderPhone && senderPhone === num) ||
+    remoteJid.includes(num) ||
+    (key.remoteJidAlt && key.remoteJidAlt.includes(num))
+  )
+) {
+  return [];
+}
 const pushName = (data.pushName || "").trim() || "Client";
 
 // Suivi du jour calendaire (heure d'Haïti) + expiration après 12h d'inactivité
@@ -757,6 +776,15 @@ return [{
   - Aux messages suivants, rappelez en **1 ligne très courte** tout ce qui est déjà retenu depuis le début (y compris le produit du 1er message !) puis demandez UNIQUEMENT ce qui manque encore. S'il ne reste qu'1 ou 2 infos (ex. juste Devis ou Proforma), posez directement la question courte sans remettre la liste complète.
   - Comprenez les quantités naturelles : en Kreyòl, « on seul » / « yon sèl » / « youn » = Quantité *1*.
   - N'affichez JAMAIS le numéro WhatsApp du chat entre parenthèses dans la liste à remplir (n'utilisez ce numéro que si le client écrit « même numéro » / « menm nimewo a »).
+  - **VÉRIFICATION DE L'ENTREPRISE / ANCIEN CONTEXTE (NE JAMAIS AFFIRMER À L'AVEUGLE) :**
+    - Si une entreprise, entité ou tiers a été mentionnée dans des messages plus anciens ou plus haut dans le fil (ex. Matelec, EyesSmart, Digitech, etc.), mais que le client ne précise pas clairement ce nom pour sa nouvelle demande :
+      **INTERDICTION STRICTE d'affirmer d'office** que la nouvelle demande est pour cette entreprise (ne dites JAMAIS : "Pwofòma pou Matelec ak EyesSmart" sans que le client ne l'ait explicitement dit pour cette commande précise !).
+    - Vous DEVEZ demander confirmation poliment en 1 phrase courte :
+      - KR : "Èske se pou [Ansyen Antrepriz] toujou, oubyen se pou yon lòt moun / antrepriz ?"
+      - FR : "Est-ce toujours pour [Ancienne Entreprise] ou pour une autre personne / entreprise ?"
+      - EN : "Is this still for [Previous Company] or for another person / company?"
+  - **MESSAGES INTERNES ENTRE COLLÈGUES / FOURNISSEURS :**
+    - Si le message semble être une consigne interne entre collaborateurs (ex. "Mande nan Island...", "Di l...", "Rele...", "Madame...", "Voye pran..."), NE CRÉEZ PAS de commande ni de récapitulatif client. Répondez en 1 phrase très courte demandant si ce message s'adresse au service client Technozi ou s'il s'agit d'une instruction interne.
 • Exception sécurité uniquement : pour une demande manifestement illégale (ex: armes, drogues), répondez en 1 phrase neutre que Technozi ne traite pas ce type de demande, sans parler de stock.
 • Si le message est incompréhensible (charabia ou faute bloquante comme "2 9minitet" ou "Hhbvjbn") : NE DEVINEZ PAS et N'EFFACEZ PAS la mémoire d'avant. Demandez en 1 phrase courte de repréciser clairement.
 
