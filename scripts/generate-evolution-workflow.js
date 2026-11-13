@@ -6,6 +6,7 @@ const path = require('path');
 const GEMINI_API_KEY = 'VOTRE_CLE_GEMINI_ICI';
 const EVOLUTION_API_KEY = 'technozi_evolution_key_2026';
 const DEVELOPER_EMAIL = 'pitonrodjy@gmail.com';
+const CONNECT_PIN = '3703';
 
 const workflow = {
   name: "Technozi AI Co-Pilot v2 (Gemini + Evolution)",
@@ -54,10 +55,71 @@ const workflow = {
         responseBody: `={{
           (() => {
             const data = $json;
+
+            // Récupérer le code PIN soumis dans la requête URL ou le formulaire
+            let reqQuery = {};
+            for (const name of ['Page Web QR Code (GET)', 'Page Web QR Code (GET)1', 'Page Web QR Code (GET)2', 'webhook-qr']) {
+              try {
+                const item = $(name).item;
+                if (item && item.json && item.json.query) {
+                  reqQuery = item.json.query;
+                  break;
+                }
+              } catch (e) {}
+            }
+
+            const inputPin = ((reqQuery && (reqQuery.pin || reqQuery.key || reqQuery.token)) || "").toString().trim();
+            const validPins = ["${CONNECT_PIN}", "technozi2026", "37030009"];
+            const isAuthorized = validPins.includes(inputPin);
+
+            // 1. ÉCRAN DE VERROUILLAGE SÉCURISÉ (SI CODE PIN ABSENT OU INCORRECT)
+            if (!isAuthorized) {
+              const hasAttempted = Boolean(inputPin);
+              return \`<!DOCTYPE html>
+              <html>
+              <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <title>Accès Sécurisé - Technozi WhatsApp</title>
+                <style>
+                  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #0b141a; color: #e9edef; text-align: center; }
+                  .card { background: #111b21; padding: 35px 25px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #222d34; max-width: 380px; width: 90%; }
+                  .lock-icon { font-size: 48px; margin-bottom: 12px; }
+                  h1 { color: #00a884; font-size: 20px; margin: 0 0 8px 0; }
+                  p { color: #8696a0; font-size: 14px; margin: 0 0 20px 0; line-height: 1.4; }
+                  input[type="password"] { width: 80%; padding: 12px 14px; border-radius: 10px; border: 1px solid #2a3942; background: #182229; color: #e9edef; font-size: 18px; text-align: center; letter-spacing: 2px; margin-bottom: 15px; outline: none; }
+                  input[type="password"]:focus { border-color: #00a884; }
+                  button { background: #00a884; color: #111b21; border: none; font-weight: bold; font-size: 15px; padding: 12px 24px; border-radius: 10px; cursor: pointer; width: 88%; }
+                  button:hover { background: #06cf9c; }
+                  .error-msg { background: rgba(241, 92, 109, 0.15); border: 1px solid #f15c6d; color: #f15c6d; padding: 10px; border-radius: 8px; font-size: 13px; margin-bottom: 15px; }
+                  .footer { font-size: 12px; color: #667781; margin-top: 20px; }
+                </style>
+              </head>
+              <body>
+                <div class="card">
+                  <div class="lock-icon">🔒</div>
+                  <h1>Accès Sécurisé Technozi</h1>
+                  <p>Cette page est strictement réservée à l'administrateur Technozi pour associer le WhatsApp officiel.</p>
+                  \${hasAttempted ? '<div class="error-msg">⚠️ Code secret ou PIN incorrect. Accès refusé.</div>' : ''}
+                  <form method="GET" action="/webhook/connect">
+                    <input type="password" name="pin" placeholder="Entrez le code PIN" autocomplete="off" autofocus required>
+                    <br>
+                    <button type="submit">Déverrouiller le QR Code</button>
+                  </form>
+                  <div class="footer">Technozi Haïti · Sécurité Administrateur</div>
+                </div>
+              </body>
+              </html>\`;
+            }
+
+            // 2. ACCÈS AUTORISÉ : AFFICHER LE QR CODE OU LE STATUT CONNECTÉ
             const b64 = data?.base64 || data?.qrcode?.base64 || "";
             const isConnected = data?.instance?.status === "open" || data?.instance?.state === "open" || data?.status === "open" || data?.state === "open";
-            
+            const safePinParam = encodeURIComponent(inputPin);
+
             if (isConnected) {
+              const owner = data?.instance?.ownerJid || data?.instance?.wuid || "";
+              const phoneDisplay = owner ? (" (+" + owner.replace(/[^0-9]/g, "") + ")") : "";
               return \`<!DOCTYPE html>
               <html>
               <head>
@@ -70,13 +132,16 @@ const workflow = {
                   .badge { font-size: 50px; margin-bottom: 10px; }
                   h1 { color: #00a884; font-size: 22px; margin: 0 0 10px 0; }
                   p { color: #8696a0; font-size: 15px; line-height: 1.5; margin: 0; }
+                  .logout-btn { display: inline-block; margin-top: 20px; color: #8696a0; font-size: 13px; text-decoration: none; border: 1px solid #222d34; padding: 6px 14px; border-radius: 8px; }
+                  .logout-btn:hover { color: #e9edef; border-color: #8696a0; }
                 </style>
               </head>
               <body>
                 <div class="card">
                   <div class="badge">✅</div>
                   <h1>WhatsApp Technozi est Connecté !</h1>
-                  <p>L'assistant IA est en ligne et surveille vos messages 24h/24.<br><br>Vous pouvez discuter normalement depuis votre téléphone.</p>
+                  <p>L'assistant IA est en ligne et surveille vos messages 24h/24\${phoneDisplay}.<br><br>Vous pouvez discuter normalement depuis votre téléphone.</p>
+                  <a href="/webhook/connect" class="logout-btn">🔒 Verrouiller la page</a>
                 </div>
               </body>
               </html>\`;
@@ -87,7 +152,7 @@ const workflow = {
               <html>
               <head>
                 <meta charset="utf-8">
-                <meta http-equiv="refresh" content="5">
+                <meta http-equiv="refresh" content="5;url=/webhook/connect?pin=\${safePinParam}">
                 <title>Initialisation...</title>
                 <style>
                   body { font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0b141a; color: #e9edef; text-align: center; }
@@ -109,7 +174,7 @@ const workflow = {
             <head>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1">
-              <meta http-equiv="refresh" content="12">
+              <meta http-equiv="refresh" content="12;url=/webhook/connect?pin=\${safePinParam}">
               <title>Scanner WhatsApp - Technozi</title>
               <style>
                 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #0b141a; color: #e9edef; text-align: center; }
@@ -121,6 +186,7 @@ const workflow = {
                 .steps { text-align: left; background: #182229; padding: 14px 18px; border-radius: 12px; margin-top: 20px; font-size: 13px; color: #d1d7db; line-height: 1.6; }
                 .steps b { color: #00a884; }
                 .footer { font-size: 12px; color: #667781; margin-top: 15px; }
+                .lock-link { display: inline-block; margin-top: 10px; color: #8696a0; font-size: 12px; text-decoration: none; }
               </style>
             </head>
             <body>
@@ -137,6 +203,7 @@ const workflow = {
                   4. Touchez <b>Connecter un appareil</b> et scannez !
                 </div>
                 <div class="footer">Actualisation automatique toutes les 12 secondes</div>
+                <div><a href="/webhook/connect" class="lock-link">🔒 Verrouiller la page</a></div>
               </div>
             </body>
             </html>\`;
