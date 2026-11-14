@@ -274,7 +274,7 @@ if (eventType === "connection.update" || eventType === "connection_update") {
       json: {
         isSystemAlert: true,
         alertType: "DISCONNECTION",
-        message: "La session WhatsApp s'est déconnectée. Veuillez rescanner le QR code sur https://bot.technozi-ht.com/webhook/connect"
+        message: "La session WhatsApp s'est déconnectée. Veuillez rescanner le QR code sur https://bot.technozi-ht.com/webhook/connect?pin=" + "${CONNECT_PIN}"
       }
     }];
   }
@@ -360,6 +360,11 @@ const fromMe = key.fromMe === true;
 // RÈGLE D'OR CO-PILOTE : GESTION DES MESSAGES VENANT DE NOTRE PROPRE NUMÉRO
 // =========================================================================
 if (fromMe) {
+  // Ignorer les messages de test automatique ou envoyés par un script de test
+  if (extractedText && (extractedText.startsWith("[TEST") || extractedText.startsWith("[BOT"))) {
+    return [];
+  }
+
   // Ignorer les échos d'envoi de menus interactifs ou sondages par le bot lui-même
   if (
     msg.listMessage ||
@@ -424,7 +429,12 @@ if (fromMe) {
   return [];
 }
 
-// Si la conversation est en cours de prise en main humaine (< 15 min), l'IA reste silencieuse
+// Débloquer immédiatement la pause si l'utilisateur envoie une commande d'urgence (/reset, /ia, /bot)
+if (extractedText && extractedText.toLowerCase().match(/^(\\/reset|\\/ia|\\/bot|\\/resume|reset bot|reinitialiser)$/)) {
+  delete staticData.pausedUntil[remoteJid];
+}
+
+// Si la conversation est en cours de prise en main humaine (< 60 min), l'IA reste silencieuse
 if (staticData.pausedUntil[remoteJid] && Date.now() < staticData.pausedUntil[remoteJid]) {
   return [];
 }
@@ -483,6 +493,7 @@ let isResetCommand = false;
 // Commande développeur / test (/reset) pour repartir sur une session vierge
 if (userText && userText.toLowerCase().match(/^(\\/reset|reset bot|reinitialiser)$/)) {
   delete staticData.conversations[remoteJid];
+  delete staticData.pausedUntil[remoteJid];
   isResetCommand = true;
   isNewDay = true;
   userText = "Bonjour";
