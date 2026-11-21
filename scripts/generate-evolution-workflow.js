@@ -253,6 +253,7 @@ staticData.lastActive = staticData.lastActive || {};
 staticData.lastDayKey = staticData.lastDayKey || {};
 staticData.recentBotTexts = staticData.recentBotTexts || {};
 staticData.processedIds = staticData.processedIds || [];
+staticData.technoziOutbound = staticData.technoziOutbound || {};
 
 const eventType = (body.event || "").toLowerCase();
 
@@ -408,12 +409,13 @@ if (fromMe) {
 
   if (hasRealContent) {
     staticData.pausedUntil[remoteJid] = Date.now() + (60 * 60 * 1000); // Pause IA de 60 minutes (prise en main humaine)
+    staticData.technoziOutbound[remoteJid] = Date.now();
     // Mémoriser brièvement la réponse humaine pour la continuité si l'IA reprend plus tard
     if (extractedText) {
       staticData.conversations[remoteJid] = staticData.conversations[remoteJid] || [];
       staticData.conversations[remoteJid].push({
         role: "model",
-        text: "[Réponse envoyée par un conseiller humain Technozi] : " + extractedText
+        text: "[Message ou question envoyé(e) par l'équipe Technozi] : " + extractedText
       });
       if (staticData.conversations[remoteJid].length > 24) {
         staticData.conversations[remoteJid] = staticData.conversations[remoteJid].slice(-24);
@@ -543,6 +545,12 @@ const isMenuCommand =
 
 const isInstantMenu = isSimpleGreeting || isMenuCommand;
 
+const isTechnoziOutbound = Boolean(
+  staticData.technoziOutbound &&
+  staticData.technoziOutbound[remoteJid] &&
+  (nowMs - staticData.technoziOutbound[remoteJid] < 24 * 60 * 60 * 1000)
+);
+
 return [{
   json: {
     senderPhone,
@@ -555,6 +563,7 @@ return [{
     haitiDayKey,
     activeLang,
     isInstantMenu,
+    isTechnoziOutbound,
     isSystemAlert: false
   }
 }];`
@@ -759,6 +768,8 @@ return [{
               ? "MÊME CONVERSATION EN COURS AUJOURD'HUI (discussion déjà entamée aujourd'hui : NE DITES PAS 'aujourd'hui', 'jodi a', 'today', 'hoy' ni formule de bienvenue)"
               : "NOUVEAU JOUR (premier échange de la journée avec ce client)";
 
+            const isTechnoziOutbound = $json.isTechnoziOutbound === true;
+
             const prevClientMsgs = history
               .filter(h => h.role === "user" && h.text)
               .slice(-10)
@@ -794,6 +805,18 @@ return [{
       - KR : "Èske se pou [Ansyen Antrepriz] toujou, oubyen se pou yon lòt moun / antrepriz ?"
       - FR : "Est-ce toujours pour [Ancienne Entreprise] ou pour une autre personne / entreprise ?"
       - EN : "Is this still for [Previous Company] or for another person / company?"
+  - **SENS DE LA DISCUSSION & INTELLIGENCE CONTEXTUELLE (RÔLE CLIENT VS FOURNISSEUR/PARTENAIRE) :**
+    - Examinez impérativement les rôles et le sens des échanges dans la conversation :
+      * Si l'historique montre que l'équipe Technozi a posé une question (par exemple une demande de disponibilité de matériel, question de prix, question à un fournisseur, question technique ou organisationnelle comme "C'est Technozi j'aimerais savoir si les 5 freezer sont disponibles"), et que l'interlocuteur répond simplement (ex. "Bonsoir, oui", "Oui", "Non", "C'est disponible", "Demain", "Ok", "En stock", "D'accord") :
+        -> **CE N'EST PAS UN CLIENT QUI COMMANDE CHEZ TECHNOZI !** C'est un fournisseur, un partenaire ou un tiers qui répond à la demande de Technozi !
+        -> **INTERDICTION FORMELLE** d'activer le questionnaire de commande/devis (ne demandez JAMAIS "Nom, Email, Numéro de téléphone, Zone de livraison").
+        -> **INTERDICTION FORMELLE** de dire "Noté pour : 5 congélateurs..." comme si Technozi recevait une commande cliente.
+        -> **RÉPONDEZ SOBREMENT ET INTELLIGEMMENT EN 1 SEULE PHRASE COURTE D'ACCUSÉ DE RÉCEPTION NATUREL :**
+          - En Français : "D'accord, merci pour l'information !" ou "C'est bien noté, merci beaucoup !"
+          - En Kreyòl : "Dakò, mèsi anpil pou enfòmasyon an !" ou "Byen note, mèsi anpil !"
+          - En Anglais : "Alright, thank you for confirming!"
+          - En Espagnol : "¡De acuerdo, muchas gracias por la información!"
+    - Le questionnaire de devis/proforma (Nom, Email, Livraison, etc.) s'applique STRICTEMENT ET UNIQUEMENT lorsque l'interlocuteur externe formule une demande explicite pour ACHETER un produit ou commander un service auprès de Technozi (ex: "J'aimerais acheter un panneau solaire", "Avez-vous des laptops à vendre ?", "Faites-moi un devis").
   - **MESSAGES INTERNES ENTRE COLLÈGUES / FOURNISSEURS :**
     - Si le message semble être une consigne interne entre collaborateurs (ex. "Mande nan Island...", "Di l...", "Rele...", "Madame...", "Voye pran..."), NE CRÉEZ PAS de commande ni de récapitulatif client. Répondez en 1 phrase très courte demandant si ce message s'adresse au service client Technozi ou s'il s'agit d'une instruction interne.
 • Exception sécurité uniquement : pour une demande manifestement illégale (ex: armes, drogues), répondez en 1 phrase neutre que Technozi ne traite pas ce type de demande, sans parler de stock.
@@ -845,6 +868,7 @@ Contexte actuel :
 • Langue active obligatoire pour cette réponse : \${activeLangLabel}
 • Date / Heure locale Haïti : \${haitiTimeInfo}
 • Statut du jour : \${dayStatusText}
+• Rôle de la conversation : \${isTechnoziOutbound ? "ATTENTION : Discussion engagée par l'équipe Technozi (Technozi a préalablement écrit ou questionné ce contact). S'il s'agit d'une simple confirmation ou réponse de sa part, accusez réception avec politesse ('D'accord, merci !') sans déclencher de devis." : "Discussion normale d'un client externe."}
 • Messages précédents du client (à retenir intégralement) : \${clientMemoryLine}
 • Nom WhatsApp affiché : \${clientName}
 • Numéro WhatsApp du chat (uniquement si "même numéro") : \${phoneDisplay}\`;
