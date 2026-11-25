@@ -441,13 +441,14 @@ if (
   return [];
 }
 
-// Ignorer les messages périmés / rejoués après reconnexion (> 3 minutes d'âge)
+// Ignorer uniquement les messages très anciens rejoués après reconnexion (> 4 heures d'âge)
+// Ne jamais bloquer les messages récents à cause d'un décalage d'horloge ou de messages en file d'attente
 const rawTs = data.messageTimestamp;
 let msgTsSec = Number(rawTs && typeof rawTs === "object" ? (rawTs.low ?? 0) : rawTs);
 if (msgTsSec > 1e12) msgTsSec = Math.floor(msgTsSec / 1000);
 if (Number.isFinite(msgTsSec) && msgTsSec > 0) {
   const ageSec = Math.floor(Date.now() / 1000) - msgTsSec;
-  if (ageSec > 180) {
+  if (ageSec > 4 * 3600) {
     return [];
   }
 }
@@ -545,7 +546,7 @@ if (fromMe) {
   );
 
   if (hasRealContent) {
-    staticData.pausedUntil[remoteJid] = Date.now() + (60 * 60 * 1000); // Pause IA de 60 minutes (prise en main humaine)
+    staticData.pausedUntil[remoteJid] = Date.now() + (15 * 60 * 1000); // Pause IA temporaire de 15 minutes (prise en main humaine)
     staticData.technoziOutbound[remoteJid] = Date.now();
     // Mémoriser brièvement la réponse humaine pour la continuité si l'IA reprend plus tard
     if (extractedText) {
@@ -568,12 +569,20 @@ if (fromMe) {
   return [];
 }
 
-// Débloquer immédiatement la pause si l'utilisateur envoie une commande d'urgence (/reset, /ia, /bot)
-if (extractedText && extractedText.toLowerCase().match(/^(\\/reset|\\/ia|\\/bot|\\/resume|reset bot|reinitialiser)$/)) {
+// Débloquer immédiatement la pause si l'utilisateur envoie une commande ou relance la discussion
+const isUnpauseRequest = Boolean(
+  extractedText && (
+    extractedText.startsWith("/") ||
+    extractedText.startsWith("!") ||
+    /^(\/?reset|\/?ia|\/?bot|\/?resume|reinitialiser|bonjour|rebonjour|bonsoir|salut|starlink|menu|devis|prix|combien)\b/i.test(extractedText.trim())
+  )
+);
+
+if (isUnpauseRequest) {
   delete staticData.pausedUntil[remoteJid];
 }
 
-// Si la conversation est en cours de prise en main humaine (< 60 min), l'IA reste silencieuse
+// Si la conversation est en cours de prise en main humaine (< 15 min), l'IA reste silencieuse
 if (staticData.pausedUntil[remoteJid] && Date.now() < staticData.pausedUntil[remoteJid]) {
   return [];
 }
@@ -630,7 +639,7 @@ let userText = extractedText;
 let isResetCommand = false;
 
 // Commande développeur / test (/reset) pour repartir sur une session vierge
-if (userText && userText.toLowerCase().match(/^(\\/reset|reset bot|reinitialiser)$/)) {
+if (userText && userText.toLowerCase().match(/^([/!]?reset|reset bot|reinitialiser)$/)) {
   delete staticData.conversations[remoteJid];
   delete staticData.pausedUntil[remoteJid];
   isResetCommand = true;
