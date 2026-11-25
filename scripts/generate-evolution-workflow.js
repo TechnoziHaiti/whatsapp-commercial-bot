@@ -12,7 +12,7 @@ const workflow = {
   name: "Technozi AI Co-Pilot v2 (Gemini + Evolution)",
   nodes: [
     // -------------------------------------------------------------------------
-    // 1. PAGE WEB D'AUTO-CONNEXION QR CODE (GET /webhook/connect)
+    // 1. PAGE WEB D'AUTO-CONNEXION QR CODE & RELANCE SANS TÉLÉPHONE (GET /webhook/connect)
     // -------------------------------------------------------------------------
     {
       parameters: {
@@ -25,8 +25,131 @@ const workflow = {
       name: "Page Web QR Code (GET)",
       type: "n8n-nodes-base.webhook",
       typeVersion: 2,
-      position: [200, 160],
+      position: [140, 160],
       webhookId: "connect"
+    },
+    {
+      parameters: {
+        conditions: {
+          boolean: [
+            {
+              value1: "={{ ['3703', 'technozi2026', '37030009'].includes((($json.query?.pin || $json.query?.key || $json.query?.token || '') + '').trim()) && ($json.query?.action === 'restart' || $json.query?.action === 'reboot') }}",
+              value2: true
+            }
+          ]
+        }
+      },
+      id: "check-restart",
+      name: "Demande Redémarrage ?",
+      type: "n8n-nodes-base.if",
+      typeVersion: 1,
+      position: [360, 160]
+    },
+    {
+      parameters: {
+        method: "POST",
+        url: "http://evolution-api:8080/instance/restart/technozi",
+        sendHeaders: true,
+        headerParameters: {
+          parameters: [
+            { name: "apikey", value: EVOLUTION_API_KEY }
+          ]
+        },
+        options: {
+          timeout: 10000
+        }
+      },
+      id: "restart-evolution-post",
+      name: "Relancer Evolution (POST)",
+      type: "n8n-nodes-base.httpRequest",
+      typeVersion: 4.2,
+      position: [580, -20],
+      continueOnFail: true
+    },
+    {
+      parameters: {
+        method: "PUT",
+        url: "http://evolution-api:8080/instance/restart/technozi",
+        sendHeaders: true,
+        headerParameters: {
+          parameters: [
+            { name: "apikey", value: EVOLUTION_API_KEY }
+          ]
+        },
+        options: {
+          timeout: 10000
+        }
+      },
+      id: "restart-evolution-put",
+      name: "Relancer Evolution (PUT)",
+      type: "n8n-nodes-base.httpRequest",
+      typeVersion: 4.2,
+      position: [800, -20],
+      continueOnFail: true
+    },
+    {
+      parameters: {
+        respondWith: "text",
+        responseBody: `={{
+          (() => {
+            let reqPin = "${CONNECT_PIN}";
+            for (const name of ['Page Web QR Code (GET)', 'Page Web QR Code (GET)1', 'Page Web QR Code (GET)2', 'webhook-qr']) {
+              try {
+                const item = $(name).item;
+                if (item && item.json && item.json.query && (item.json.query.pin || item.json.query.key)) {
+                  reqPin = (item.json.query.pin || item.json.query.key).toString().trim();
+                  break;
+                }
+              } catch (e) {}
+            }
+            const safePinParam = encodeURIComponent(reqPin);
+            return \`<!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <meta http-equiv="refresh" content="6;url=/webhook/connect?pin=\${safePinParam}">
+              <title>Redémarrage WhatsApp - Technozi</title>
+              <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0b141a; color: #e9edef; text-align: center; }
+                .card { background: #111b21; padding: 40px 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #222d34; max-width: 420px; width: 90%; }
+                .badge { font-size: 50px; margin-bottom: 15px; }
+                h1 { color: #00a884; font-size: 22px; margin: 0 0 12px 0; }
+                p { color: #8696a0; font-size: 14px; line-height: 1.6; margin: 0 0 24px 0; }
+                .btn { display: inline-block; background: #00a884; color: #111b21; font-weight: bold; font-size: 14px; padding: 12px 24px; border-radius: 10px; text-decoration: none; transition: background 0.2s; }
+                .btn:hover { background: #06cf9c; }
+                .note { font-size: 12px; color: #667781; margin-top: 18px; }
+              </style>
+            </head>
+            <body>
+              <div class="card">
+                <div class="badge">🔄</div>
+                <h1>Relance WhatsApp en cours...</h1>
+                <p>
+                  L'ordre de reconnexion a été transmis à la passerelle Evolution API.<br><br>
+                  La session se reconnecte automatiquement avec vos clés enregistrées <b>sans toucher au téléphone</b>.
+                </p>
+                <a href="/webhook/connect?pin=\${safePinParam}" class="btn">Vérifier le statut maintenant</a>
+                <div class="note">Actualisation automatique dans 6 secondes...</div>
+              </div>
+            </body>
+            </html>\`;
+          })()
+        }}`,
+        options: {
+          responseCode: 200,
+          responseHeaders: {
+            entries: [
+              { name: "Content-Type", value: "text/html; charset=utf-8" }
+            ]
+          }
+        }
+      },
+      id: "respond-restart-html",
+      name: "Afficher Page Confirmation Relance",
+      type: "n8n-nodes-base.respondToWebhook",
+      typeVersion: 1.1,
+      position: [1020, -20]
     },
     {
       parameters: {
@@ -46,7 +169,7 @@ const workflow = {
       name: "Récupérer QR Evolution",
       type: "n8n-nodes-base.httpRequest",
       typeVersion: 4.2,
-      position: [440, 160],
+      position: [580, 160],
       continueOnFail: true
     },
     {
@@ -128,11 +251,14 @@ const workflow = {
                 <title>Technozi WhatsApp - Connecté</title>
                 <style>
                   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0b141a; color: #e9edef; text-align: center; }
-                  .card { background: #111b21; padding: 40px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #222d34; max-width: 420px; }
+                  .card { background: #111b21; padding: 35px 25px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #222d34; max-width: 420px; width: 90%; }
                   .badge { font-size: 50px; margin-bottom: 10px; }
                   h1 { color: #00a884; font-size: 22px; margin: 0 0 10px 0; }
-                  p { color: #8696a0; font-size: 15px; line-height: 1.5; margin: 0; }
-                  .logout-btn { display: inline-block; margin-top: 20px; color: #8696a0; font-size: 13px; text-decoration: none; border: 1px solid #222d34; padding: 6px 14px; border-radius: 8px; }
+                  p { color: #8696a0; font-size: 14px; line-height: 1.5; margin: 0; }
+                  .action-box { margin-top: 24px; padding-top: 20px; border-top: 1px solid #222d34; }
+                  .restart-btn { display: inline-block; background: #233138; color: #00a884; border: 1px solid #00a884; font-weight: 600; font-size: 14px; padding: 12px 18px; border-radius: 10px; text-decoration: none; transition: all 0.2s; width: 90%; box-sizing: border-box; }
+                  .restart-btn:hover { background: #00a884; color: #111b21; }
+                  .logout-btn { display: inline-block; margin-top: 18px; color: #8696a0; font-size: 13px; text-decoration: none; border: 1px solid #222d34; padding: 6px 14px; border-radius: 8px; }
                   .logout-btn:hover { color: #e9edef; border-color: #8696a0; }
                 </style>
               </head>
@@ -141,7 +267,17 @@ const workflow = {
                   <div class="badge">✅</div>
                   <h1>WhatsApp Technozi est Connecté !</h1>
                   <p>L'assistant IA est en ligne et surveille vos messages 24h/24\${phoneDisplay}.<br><br>Vous pouvez discuter normalement depuis votre téléphone.</p>
-                  <a href="/webhook/connect" class="logout-btn">🔒 Verrouiller la page</a>
+                  
+                  <div class="action-box">
+                    <p style="font-size: 13px; color: #8696a0; margin-bottom: 12px;">Le bot semble endormi ou ne répond plus ?</p>
+                    <a href="/webhook/connect?pin=\${safePinParam}&action=restart" class="restart-btn" onclick="this.innerHTML='⏳ Redémarrage en cours...';">
+                      🔄 Réveiller / Relancer le bot (sans téléphone)
+                    </a>
+                  </div>
+
+                  <div>
+                    <a href="/webhook/connect" class="logout-btn">🔒 Verrouiller la page</a>
+                  </div>
                 </div>
               </body>
               </html>\`;
@@ -222,7 +358,7 @@ const workflow = {
       name: "Afficher Page HTML QR",
       type: "n8n-nodes-base.respondToWebhook",
       typeVersion: 1.1,
-      position: [680, 160]
+      position: [800, 160]
     },
 
     // -------------------------------------------------------------------------
@@ -1053,7 +1189,19 @@ return [{
   ],
   connections: {
     "Page Web QR Code (GET)": {
-      main: [[{ node: "Récupérer QR Evolution", type: "main", index: 0 }]]
+      main: [[{ node: "Demande Redémarrage ?", type: "main", index: 0 }]]
+    },
+    "Demande Redémarrage ?": {
+      main: [
+        [{ node: "Relancer Evolution (POST)", type: "main", index: 0 }],
+        [{ node: "Récupérer QR Evolution", type: "main", index: 0 }]
+      ]
+    },
+    "Relancer Evolution (POST)": {
+      main: [[{ node: "Relancer Evolution (PUT)", type: "main", index: 0 }]]
+    },
+    "Relancer Evolution (PUT)": {
+      main: [[{ node: "Afficher Page Confirmation Relance", type: "main", index: 0 }]]
     },
     "Récupérer QR Evolution": {
       main: [[{ node: "Afficher Page HTML QR", type: "main", index: 0 }]]
