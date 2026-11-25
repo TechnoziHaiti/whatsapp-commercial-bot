@@ -12,7 +12,7 @@ const workflow = {
   name: "Technozi AI Co-Pilot v2 (Gemini + Evolution)",
   nodes: [
     // -------------------------------------------------------------------------
-    // 1. PAGE WEB D'AUTO-CONNEXION QR CODE & RELANCE SANS TÉLÉPHONE (GET /webhook/connect)
+    // 1. PAGE WEB D'AUTO-CONNEXION QR CODE (GET /webhook/connect)
     // -------------------------------------------------------------------------
     {
       parameters: {
@@ -30,20 +30,42 @@ const workflow = {
     },
     {
       parameters: {
-        conditions: {
-          boolean: [
-            {
-              value1: "={{ ['3703', 'technozi2026', '37030009'].includes((($json.query?.pin || $json.query?.key || $json.query?.token || '') + '').trim()) && ($json.query?.action === 'restart' || $json.query?.action === 'reboot') }}",
-              value2: true
-            }
+        method: "GET",
+        url: "http://evolution-api:8080/instance/connect/technozi",
+        sendHeaders: true,
+        headerParameters: {
+          parameters: [
+            { name: "apikey", value: EVOLUTION_API_KEY }
           ]
+        },
+        options: {
+          timeout: 10000
         }
       },
-      id: "check-restart",
-      name: "Demande Redémarrage ?",
-      type: "n8n-nodes-base.if",
-      typeVersion: 1,
-      position: [360, 160]
+      id: "fetch-qr",
+      name: "Récupérer QR Evolution",
+      type: "n8n-nodes-base.httpRequest",
+      typeVersion: 4.2,
+      position: [380, 160],
+      continueOnFail: true
+    },
+
+    // -------------------------------------------------------------------------
+    // 1-BIS. PAGE WEB DE RELANCE DIRECTE SANS TÉLÉPHONE (GET /webhook/restart)
+    // -------------------------------------------------------------------------
+    {
+      parameters: {
+        httpMethod: "GET",
+        path: "restart",
+        responseMode: "responseNode",
+        options: {}
+      },
+      id: "webhook-restart",
+      name: "Page Web Relance (GET)",
+      type: "n8n-nodes-base.webhook",
+      typeVersion: 2,
+      position: [140, -40],
+      webhookId: "restart"
     },
     {
       parameters: {
@@ -63,7 +85,7 @@ const workflow = {
       name: "Relancer Evolution (POST)",
       type: "n8n-nodes-base.httpRequest",
       typeVersion: 4.2,
-      position: [580, -20],
+      position: [380, -40],
       continueOnFail: true
     },
     {
@@ -84,7 +106,7 @@ const workflow = {
       name: "Relancer Evolution (PUT)",
       type: "n8n-nodes-base.httpRequest",
       typeVersion: 4.2,
-      position: [800, -20],
+      position: [620, -40],
       continueOnFail: true
     },
     {
@@ -93,7 +115,7 @@ const workflow = {
         responseBody: `={{
           (() => {
             let reqPin = "${CONNECT_PIN}";
-            for (const name of ['Page Web QR Code (GET)', 'Page Web QR Code (GET)1', 'Page Web QR Code (GET)2', 'webhook-qr']) {
+            for (const name of ['Page Web Relance (GET)', 'Page Web Relance (GET)1', 'Page Web Relance (GET)2', 'webhook-restart']) {
               try {
                 const item = $(name).item;
                 if (item && item.json && item.json.query && (item.json.query.pin || item.json.query.key)) {
@@ -124,10 +146,10 @@ const workflow = {
             <body>
               <div class="card">
                 <div class="badge">🔄</div>
-                <h1>Relance WhatsApp en cours...</h1>
+                <h1>Relance WhatsApp effectuée !</h1>
                 <p>
-                  L'ordre de reconnexion a été transmis à la passerelle Evolution API.<br><br>
-                  La session se reconnecte automatiquement avec vos clés enregistrées <b>sans toucher au téléphone</b>.
+                  L'ordre de redémarrage a été envoyé à la passerelle Evolution API.<br><br>
+                  La connexion se rétablit avec vos identifiants existants <b>sans toucher au téléphone</b>.
                 </p>
                 <a href="/webhook/connect?pin=\${safePinParam}" class="btn">Vérifier le statut maintenant</a>
                 <div class="note">Actualisation automatique dans 6 secondes...</div>
@@ -149,28 +171,7 @@ const workflow = {
       name: "Afficher Page Confirmation Relance",
       type: "n8n-nodes-base.respondToWebhook",
       typeVersion: 1.1,
-      position: [1020, -20]
-    },
-    {
-      parameters: {
-        method: "GET",
-        url: "http://evolution-api:8080/instance/connect/technozi",
-        sendHeaders: true,
-        headerParameters: {
-          parameters: [
-            { name: "apikey", value: EVOLUTION_API_KEY }
-          ]
-        },
-        options: {
-          timeout: 10000
-        }
-      },
-      id: "fetch-qr",
-      name: "Récupérer QR Evolution",
-      type: "n8n-nodes-base.httpRequest",
-      typeVersion: 4.2,
-      position: [580, 160],
-      continueOnFail: true
+      position: [860, -40]
     },
     {
       parameters: {
@@ -270,7 +271,7 @@ const workflow = {
                   
                   <div class="action-box">
                     <p style="font-size: 13px; color: #8696a0; margin-bottom: 12px;">Le bot semble endormi ou ne répond plus ?</p>
-                    <a href="/webhook/connect?pin=\${safePinParam}&action=restart" class="restart-btn" onclick="this.innerHTML='⏳ Redémarrage en cours...';">
+                    <a href="/webhook/restart?pin=\${safePinParam}" class="restart-btn" onclick="this.innerHTML='⏳ Redémarrage en cours...';">
                       🔄 Réveiller / Relancer le bot (sans téléphone)
                     </a>
                   </div>
@@ -358,7 +359,7 @@ const workflow = {
       name: "Afficher Page HTML QR",
       type: "n8n-nodes-base.respondToWebhook",
       typeVersion: 1.1,
-      position: [800, 160]
+      position: [620, 160]
     },
 
     // -------------------------------------------------------------------------
@@ -1189,22 +1190,19 @@ return [{
   ],
   connections: {
     "Page Web QR Code (GET)": {
-      main: [[{ node: "Demande Redémarrage ?", type: "main", index: 0 }]]
+      main: [[{ node: "Récupérer QR Evolution", type: "main", index: 0 }]]
     },
-    "Demande Redémarrage ?": {
-      main: [
-        [{ node: "Relancer Evolution (POST)", type: "main", index: 0 }],
-        [{ node: "Récupérer QR Evolution", type: "main", index: 0 }]
-      ]
+    "Récupérer QR Evolution": {
+      main: [[{ node: "Afficher Page HTML QR", type: "main", index: 0 }]]
+    },
+    "Page Web Relance (GET)": {
+      main: [[{ node: "Relancer Evolution (POST)", type: "main", index: 0 }]]
     },
     "Relancer Evolution (POST)": {
       main: [[{ node: "Relancer Evolution (PUT)", type: "main", index: 0 }]]
     },
     "Relancer Evolution (PUT)": {
       main: [[{ node: "Afficher Page Confirmation Relance", type: "main", index: 0 }]]
-    },
-    "Récupérer QR Evolution": {
-      main: [[{ node: "Afficher Page HTML QR", type: "main", index: 0 }]]
     },
     "Webhook Messages Evolution": {
       main: [[{ node: "1. Filtre & Détecteur Humain", type: "main", index: 0 }]]
